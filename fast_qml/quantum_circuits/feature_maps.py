@@ -61,3 +61,38 @@ class AmplitudeEmbedding(FeatureMap):
             normalize=self._normalize,
             pad_with=self._pad_with
         )
+
+
+class ZZFeatureMap(FeatureMap):
+    def __init__(
+            self,
+            n_qubits: int,
+            features_tensor: np.ndarray
+    ):
+        super().__init__(
+            n_qubits=n_qubits,
+            features_tensor=features_tensor
+        )
+        self._verify_data_dims()
+        self._n_load = min(len(features_tensor), n_qubits)
+
+    def _verify_data_dims(self):
+        features_len = self._features_tensor.shape[-1]
+        if not features_len == self._n_qubits:
+            raise ValueError(
+                f"Features must be of length {self._n_qubits}. "
+                f"Got length {features_len}."
+            )
+
+    def circuit(self) -> None:
+        for i in range(self._n_load):
+            qml.Hadamard(wires=[i])
+            qml.RZ(2.0 * self._features_tensor[i], wires=[i])
+
+        for q0, q1 in list(combinations(range(self._n_load), 2)):
+            qml.CZ(wires=[q0, q1])
+            qml.RZ(
+                2.0 * (np.pi - self._features_tensor[q0]) * (np.pi - self._features_tensor[q1]),
+                wires=[q1]
+            )
+            qml.CZ(wires=[q0, q1])
