@@ -7,33 +7,34 @@ from typing import Union
 
 
 class FeatureMap:
-    def __init__(
-            self,
-            n_qubits: int,
-            features_tensor: np.ndarray
-    ):
+    def __init__(self, n_qubits: int):
         self._n_qubits = n_qubits
-        self._features_tensor = features_tensor
 
     @abstractmethod
-    def circuit(self) -> None:
+    def circuit(
+            self,
+            features: np.ndarray
+    ) -> None:
         pass
 
-    def __call__(self) -> None:
-        self.circuit()
+    def __call__(
+            self,
+            features: np.ndarray
+    ) -> None:
+        self.circuit(features)
 
 
 class AngleEmbedding(FeatureMap):
-    def __init__(self, n_qubits, features_tensor, rotation: str = 'X'):
-        super().__init__(
-            n_qubits=n_qubits,
-            features_tensor=features_tensor
-        )
+    def __init__(self, n_qubits, rotation: str = 'X'):
+        super().__init__(n_qubits=n_qubits)
         self._rotation = rotation
 
-    def circuit(self):
+    def circuit(
+            self,
+            features: np.ndarray
+    ) -> None:
         qml.AngleEmbedding(
-            features=self._features_tensor,
+            features=features,
             wires=range(self._n_qubits),
             rotation=self._rotation
         )
@@ -43,20 +44,19 @@ class AmplitudeEmbedding(FeatureMap):
     def __init__(
             self,
             n_qubits: int,
-            features_tensor: np.ndarray,
             normalize: bool = True,
             pad_with: Union[float, complex] = 0.0
     ):
-        super().__init__(
-            n_qubits=n_qubits,
-            features_tensor=features_tensor
-        )
+        super().__init__(n_qubits=n_qubits)
         self._normalize = normalize
         self._pad_with = pad_with
 
-    def circuit(self):
+    def circuit(
+            self,
+            features: np.ndarray
+    ) -> None:
         qml.AmplitudeEmbedding(
-            features=[x for x in self._features_tensor],
+            features=[x for x in features],
             wires=range(self._n_qubits),
             normalize=self._normalize,
             pad_with=self._pad_with
@@ -66,33 +66,36 @@ class AmplitudeEmbedding(FeatureMap):
 class ZZFeatureMap(FeatureMap):
     def __init__(
             self,
-            n_qubits: int,
-            features_tensor: np.ndarray
+            n_qubits: int
     ):
-        super().__init__(
-            n_qubits=n_qubits,
-            features_tensor=features_tensor
-        )
-        self._verify_data_dims()
-        self._n_load = min(len(features_tensor), n_qubits)
+        super().__init__(n_qubits=n_qubits)
 
-    def _verify_data_dims(self):
-        features_len = self._features_tensor.shape[-1]
+    def _verify_data_dims(
+            self,
+            features: np.ndarray
+    ) -> None:
+        features_len = features.shape[-1]
         if not features_len == self._n_qubits:
             raise ValueError(
                 f"Features must be of length {self._n_qubits}. "
                 f"Got length {features_len}."
             )
 
-    def circuit(self) -> None:
-        for i in range(self._n_load):
-            qml.Hadamard(wires=[i])
-            qml.RZ(2.0 * self._features_tensor[i], wires=[i])
+    def circuit(
+            self,
+            features: np.ndarray
+    ) -> None:
+        self._verify_data_dims(features)
 
-        for q0, q1 in list(combinations(range(self._n_load), 2)):
+        n_load = min(len(features), self._n_qubits)
+        for i in range(n_load):
+            qml.Hadamard(wires=[i])
+            qml.RZ(2.0 * features[i], wires=[i])
+
+        for q0, q1 in list(combinations(range(n_load), 2)):
             qml.CZ(wires=[q0, q1])
             qml.RZ(
-                2.0 * (np.pi - self._features_tensor[q0]) * (np.pi - self._features_tensor[q1]),
+                2.0 * (np.pi - features[q0]) * (np.pi - features[q1]),
                 wires=[q1]
             )
             qml.CZ(wires=[q0, q1])
