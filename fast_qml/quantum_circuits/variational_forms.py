@@ -119,3 +119,69 @@ class TwoLocal(VariationalForm):
 
         if not self._skip_last_rotation:
             rotations(-1)
+
+class EfficientSU2(TwoLocal):
+    """
+    Quantum variational form with an efficient SU(2) structure.
+
+    Parameters:
+    - n_qubits (int): Number of qubits in the quantum circuit.
+    - rotation_blocks (list[str]): List of rotation gate names. If None, default is ['RY', 'RZ'].
+    - controlled_gate (str): Name of the controlled gate. Default is 'CX' (controlled-X gate).
+    - entanglement (str): Type of entanglement to be applied. Default is 'linear'.
+    - reps (int): Number of repetitions in the variational circuit. Default is 1.
+    """
+
+    def __init__(
+            self,
+            n_qubits: int,
+            rotation_blocks: list[str] = None,
+            controlled_gate: str = 'CX',
+            entanglement: str = 'linear',
+            skip_last_rotation: bool = False,
+            reps: int = 1
+    ):
+        super().__init__(
+            n_qubits=n_qubits,
+            rotation_blocks=rotation_blocks,
+            controlled_gate=controlled_gate,
+            entanglement=entanglement,
+            skip_last_rotation=skip_last_rotation,
+            reps=reps
+        )
+        if rotation_blocks is None:
+            self._rotation_blocks = [qml.RY, qml.RZ]
+        elif len(rotation_blocks) != 2:
+            raise ValueError(
+                "EfficientSU2 requires exactly 2 rotation blocks."
+            )
+
+        self._init_params()
+
+
+class RealAmplitudes(TwoLocal):
+    """
+    Quantum variational form with real amplitudes. Inherits from the 'TwoLocal' class.
+
+    Parameters:
+    - n_qubits (int): Number of qubits in the quantum circuit.
+    - entanglement (str): Type of entanglement to be applied. Default is 'linear'.
+    - reps (int): Number of repetitions in the variational circuit. Default is 1.
+    """
+
+    def __init__(
+            self,
+            n_qubits: int,
+            entanglement: str = 'linear',
+            skip_last_rotation: bool = False,
+            reps: int = 1
+    ):
+        super().__init__(
+            n_qubits=n_qubits,
+            entanglement=entanglement,
+            skip_last_rotation=skip_last_rotation,
+            reps=reps
+        )
+
+        self._rotation_blocks = [qml.RY]
+        self._init_params()
