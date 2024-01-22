@@ -49,6 +49,12 @@ class VariationalForm:
             entanglement=entanglement
         )
 
+        self._params = self._init_params()
+
+    @property
+    def params(self):
+        return self._params
+
     @abstractmethod
     def _init_params(self) -> None:
         pass
@@ -99,10 +105,9 @@ class TwoLocal(VariationalForm):
             skip_last_rotation=skip_last_rotation,
             reps=reps
         )
-        self._init_params()
 
     def _init_params(self) -> None:
-        self._params = 0.01 * qnp.random.randn(
+        return 0.01 * qnp.random.randn(
             self._reps + 1, self._n_qubits * len(self._rotation_blocks), 1,
             requires_grad=True
         )
@@ -119,6 +124,7 @@ class TwoLocal(VariationalForm):
 
         if not self._skip_last_rotation:
             rotations(-1)
+
 
 class EfficientSU2(TwoLocal):
     """
@@ -141,6 +147,13 @@ class EfficientSU2(TwoLocal):
             skip_last_rotation: bool = False,
             reps: int = 1
     ):
+        if rotation_blocks is None:
+            self._rotation_blocks = [qml.RY, qml.RZ]
+        elif len(rotation_blocks) != 2:
+            raise ValueError(
+                "EfficientSU2 requires exactly 2 rotation blocks."
+            )
+
         super().__init__(
             n_qubits=n_qubits,
             rotation_blocks=rotation_blocks,
@@ -149,14 +162,6 @@ class EfficientSU2(TwoLocal):
             skip_last_rotation=skip_last_rotation,
             reps=reps
         )
-        if rotation_blocks is None:
-            self._rotation_blocks = [qml.RY, qml.RZ]
-        elif len(rotation_blocks) != 2:
-            raise ValueError(
-                "EfficientSU2 requires exactly 2 rotation blocks."
-            )
-
-        self._init_params()
 
 
 class RealAmplitudes(TwoLocal):
@@ -176,15 +181,14 @@ class RealAmplitudes(TwoLocal):
             skip_last_rotation: bool = False,
             reps: int = 1
     ):
+        self._rotation_blocks = [qml.RY]
+
         super().__init__(
             n_qubits=n_qubits,
             entanglement=entanglement,
             skip_last_rotation=skip_last_rotation,
             reps=reps
         )
-
-        self._rotation_blocks = [qml.RY]
-        self._init_params()
 
 
 class TreeTensor(VariationalForm):
@@ -195,13 +199,6 @@ class TreeTensor(VariationalForm):
             controlled_gate: str = 'CX',
             reps: int = 1
     ):
-        super().__init__(
-            n_qubits=n_qubits,
-            rotation_blocks=rotation_blocks,
-            controlled_gate=controlled_gate,
-            reps=reps
-        )
-
         if rotation_blocks is None:
             self._rotation_blocks = [qml.RY]
 
@@ -211,8 +208,15 @@ class TreeTensor(VariationalForm):
                 "to be a power of two."
             )
 
-        self._reps = int(np.log2(n_qubits))
+        super().__init__(
+            n_qubits=n_qubits,
+            rotation_blocks=rotation_blocks,
+            controlled_gate=controlled_gate,
+            reps=reps
+        )
+
         self._init_params()
+        self._reps = int(np.log2(n_qubits))
 
     def _init_params(self) -> None:
         self._params = 0.01 * qnp.random.randn(
