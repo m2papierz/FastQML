@@ -1,5 +1,5 @@
-import numpy as np
 import pennylane as qml
+from fast_qml import numpy as np
 
 from abc import abstractmethod
 from itertools import combinations

@@ -1,7 +1,7 @@
 import importlib
 
 _device = 'CPU'
-np = importlib.import_module("jax.numpy")
+numpy = importlib.import_module("jax.numpy")
 
 
 def update(device='CPU'):
@@ -10,7 +10,7 @@ def update(device='CPU'):
     else:
         new_np = importlib.import_module("jax.numpy")
 
-    globals()['np'] = new_np
+    globals()['numpy'] = new_np
 
 
-__all__ = ['np', 'update']
+__all__ = ['numpy', 'update']
