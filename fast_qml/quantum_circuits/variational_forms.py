@@ -48,17 +48,10 @@ class VariationalForm:
             entanglement=entanglement
         )
 
-        self._params = self._init_params()
-
-    @property
-    def params(self):
-        return self._params
-
-    @abstractmethod
-    def _init_params(self) -> None:
-        pass
-
-    def _validate_gate(self, c_gate: str) -> Any:
+    def _validate_gate(
+            self,
+            c_gate: str
+    ) -> Any:
         if c_gate in self.GATE_MAP:
             return self.GATE_MAP[c_gate]
         else:
@@ -68,11 +61,25 @@ class VariationalForm:
             )
 
     @abstractmethod
-    def circuit(self) -> None:
+    def get_params_dims(self):
         pass
 
-    def __call__(self) -> None:
-        self.circuit()
+    def _validate_params_dims(
+            self,
+            params: np.ndarray
+    ) -> None:
+        if params.shape != self.get_params_dims():
+            raise ValueError(
+                f"Invalid parameters shape. "
+                f"Expected {self.get_params_dims()}, got {params.shape}."
+            )
+
+    @abstractmethod
+    def circuit(
+            self,
+            params: np.ndarray
+    ) -> None:
+        pass
 
 
 class TwoLocal(VariationalForm):
@@ -105,16 +112,28 @@ class TwoLocal(VariationalForm):
             reps=reps
         )
 
-    def _init_params(self) -> np.ndarray:
-        return 0.01 * np.random.randn(
-            self._reps + 1, self._n_qubits * len(self._rotation_blocks), 1
+    def get_params_dims(self) -> tuple:
+        if self._skip_last_rotation:
+            layers_n = self._reps
+        else:
+            layers_n = self._reps + 1
+        gate_params_n = 1
+        return (
+            layers_n,
+            self._n_qubits * len(self._rotation_blocks),
+            gate_params_n
         )
 
-    def circuit(self) -> None:
+    def circuit(
+            self,
+            params: np.ndarray
+    ) -> None:
+        self._validate_params_dims(params)
+
         def rotations(r_num):
             for i in range(self._n_qubits):
                 for j, rot_ in enumerate(self._rotation_blocks):
-                    rot_(self._params[r_num, j * self._n_qubits + i], wires=[i])
+                    rot_(params[r_num, j * self._n_qubits + i], wires=[i])
 
         for r in range(self._reps):
             rotations(r)
@@ -213,21 +232,27 @@ class TreeTensor(VariationalForm):
             reps=reps
         )
 
-        self._init_params()
         self._reps = int(np.log2(n_qubits))
 
-    def _init_params(self) -> np.ndarray[float]:
-        self._params = 0.01 * np.random.randn(
-            2 * self._n_qubits - 1, 1
+    def get_params_dims(self) -> tuple:
+        gate_params_n = 1
+        return (
+            2 * self._n_qubits - 1,
+            gate_params_n
         )
 
-    def circuit(self) -> None:
+    def circuit(
+            self,
+            params: np.ndarray
+    ) -> None:
+        self._validate_params_dims(params)
+
         for i in range(self._n_qubits):
-            qml.RY(float(self._params[i]), wires=[i])
+            qml.RY(float(params[i]), wires=[i])
 
         n_qubits = self._n_qubits
         for r in range(1, self._reps + 1):
             for s in range(0, 2 ** (self._reps - r)):
                 qml.CNOT(wires=[(s * 2 ** r), (s * 2 ** r) + (2 ** (r - 1))])
-                qml.RY(float(self._params[n_qubits + s]), wires=[(s * 2 ** r)])
+                qml.RY(float(params[n_qubits + s]), wires=[(s * 2 ** r)])
             n_qubits += 2 ** (self._reps - r)
