@@ -185,3 +185,48 @@ class RealAmplitudes(TwoLocal):
 
         self._rotation_blocks = [qml.RY]
         self._init_params()
+
+
+class TreeTensor(VariationalForm):
+    def __init__(
+            self,
+            n_qubits: int,
+            rotation_blocks: list[str] = None,
+            controlled_gate: str = 'CX',
+            reps: int = 1
+    ):
+        super().__init__(
+            n_qubits=n_qubits,
+            rotation_blocks=rotation_blocks,
+            controlled_gate=controlled_gate,
+            reps=reps
+        )
+
+        if rotation_blocks is None:
+            self._rotation_blocks = [qml.RY]
+
+        if not (n_qubits & (n_qubits - 1)) == 0:
+            raise ValueError(
+                "TreeTensor ansatz requires the number of qubits "
+                "to be a power of two."
+            )
+
+        self._reps = int(np.log2(n_qubits))
+        self._init_params()
+
+    def _init_params(self) -> None:
+        self._params = 0.01 * qnp.random.randn(
+            2 * self._n_qubits - 1, 1,
+            requires_grad=True
+        )
+
+    def circuit(self) -> None:
+        for i in range(self._n_qubits):
+            qml.RY(self._params[i], wires=[i])
+
+        n_qubits = self._n_qubits
+        for r in range(1, self._reps + 1):
+            for s in range(0, 2 ** (self._reps - r)):
+                qml.CNOT(wires=[(s * 2 ** r), (s * 2 ** r) + (2 ** (r - 1))])
+                qml.RY(self._params[n_qubits + s], wires=[(s * 2 ** r)])
+            n_qubits += 2 ** (self._reps - r)
