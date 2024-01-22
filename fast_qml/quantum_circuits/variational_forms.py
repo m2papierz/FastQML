@@ -1,10 +1,9 @@
-import numpy as np
 import pennylane as qml
 
 from typing import Any
 from abc import abstractmethod
-from pennylane import numpy as qnp
 
+from fast_qml import numpy as np
 from fast_qml.quantum_circuits.entanglement import EntanglementGenerator
 
 
@@ -106,10 +105,9 @@ class TwoLocal(VariationalForm):
             reps=reps
         )
 
-    def _init_params(self) -> None:
-        return 0.01 * qnp.random.randn(
-            self._reps + 1, self._n_qubits * len(self._rotation_blocks), 1,
-            requires_grad=True
+    def _init_params(self) -> np.ndarray:
+        return 0.01 * np.random.randn(
+            self._reps + 1, self._n_qubits * len(self._rotation_blocks), 1
         )
 
     def circuit(self) -> None:
@@ -218,19 +216,18 @@ class TreeTensor(VariationalForm):
         self._init_params()
         self._reps = int(np.log2(n_qubits))
 
-    def _init_params(self) -> None:
-        self._params = 0.01 * qnp.random.randn(
-            2 * self._n_qubits - 1, 1,
-            requires_grad=True
+    def _init_params(self) -> np.ndarray[float]:
+        self._params = 0.01 * np.random.randn(
+            2 * self._n_qubits - 1, 1
         )
 
     def circuit(self) -> None:
         for i in range(self._n_qubits):
-            qml.RY(self._params[i], wires=[i])
+            qml.RY(float(self._params[i]), wires=[i])
 
         n_qubits = self._n_qubits
         for r in range(1, self._reps + 1):
             for s in range(0, 2 ** (self._reps - r)):
                 qml.CNOT(wires=[(s * 2 ** r), (s * 2 ** r) + (2 ** (r - 1))])
-                qml.RY(self._params[n_qubits + s], wires=[(s * 2 ** r)])
+                qml.RY(float(self._params[n_qubits + s]), wires=[(s * 2 ** r)])
             n_qubits += 2 ** (self._reps - r)
