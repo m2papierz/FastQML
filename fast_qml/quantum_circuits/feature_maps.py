@@ -67,6 +67,23 @@ class AmplitudeEmbedding(FeatureMap):
         )
 
 
+class IQPEmbedding(FeatureMap):
+    def __init__(
+            self,
+            n_qubits: int
+    ):
+        super().__init__(n_qubits=n_qubits)
+
+    def apply(
+            self,
+            features: np.ndarray
+    ) -> None:
+        qml.IQPEmbedding(
+            features=features,
+            wires=range(self._n_qubits)
+        )
+
+
 class ZZFeatureMap(FeatureMap):
     def __init__(
             self,
