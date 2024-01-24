@@ -8,17 +8,16 @@
 #
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
-import jax
+import fast_qml
+import numpy as np
 import pennylane as qml
 
-from jax import numpy as jnp
-from abc import abstractmethod
+from pennylane import numpy as qnp
 
+from fast_qml import QubitDevice
 from fast_qml.quantum_circuits.feature_maps import FeatureMap
 from fast_qml.quantum_circuits.variational_forms import VariationalForm
-from fast_qml.machine_learning.optimizer import JITOptimizer
-
-JITOptimizer.register_pytree_node()
+from fast_qml.machine_learning.optimizer import DefaultOptimizer, JITOptimizer
 
 
 class VariationalModel:
@@ -26,57 +25,68 @@ class VariationalModel:
             self,
             n_qubits: int,
             feature_map: FeatureMap,
-            ansatz: VariationalForm
+            ansatz: VariationalForm,
+            measurement_op: qml.operation.Operation
     ):
         self._n_qubits = n_qubits
         self._feature_map = feature_map
         self._ansatz = ansatz
+        self._measurement_op = measurement_op
 
         self._weights = self._init_weights()
-        self._device = qml.device(
-            name="default.qubit.jax", wires=n_qubits
-        )
 
-    def _init_weights(self) -> jnp.ndarray:
-        return jax.random.normal(
-            key=jax.random.PRNGKey(42),
-            shape=(self._ansatz.get_params_num(),)
-        )
+        if fast_qml.DEVICE == QubitDevice.CPU.value:
+            self._interface = 'auto'
+            self._optimizer = DefaultOptimizer
+            self._device = qml.device(
+                name="default.qubit", wires=n_qubits
+            )
+        elif fast_qml.DEVICE == QubitDevice.CPU_JAX.value:
+            self._interface = 'jax'
+            self._optimizer = JITOptimizer
+            self._optimizer.register_pytree_node()
+            self._device = qml.device(
+                name="default.qubit.jax", wires=n_qubits
+            )
+        else:
+            raise NotImplementedError()
+
+    def _init_weights(self) -> np.ndarray:
+        weights = 0.1 * qnp.random.random(
+            self._ansatz.get_params_num(), requires_grad=True)
+        return weights
 
     def _q_model(
             self,
-            weights: jnp.ndarray,
-            x_data: jnp.ndarray
+            weights: np.ndarray,
+            x_data: np.ndarray
     ):
-        @jax.jit
-        @qml.qnode(device=self._device, interface='jax')
+        @qml.qnode(device=self._device, interface=self._interface)
         def _quantum_circuit():
             self._feature_map.apply(features=x_data)
             self._ansatz.apply(params=weights)
-            return qml.expval(qml.PauliZ(0))
+            return qml.expval(self._measurement_op)
         return _quantum_circuit()
 
     def fit(
             self,
-            x_data: jnp.ndarray,
-            y_data: jnp.ndarray,
+            x_data: np.ndarray,
+            y_data: np.ndarray,
+            learning_rate: float,
+            verbose: bool,
             epochs: int
     ):
-        optimizer = JITOptimizer(
-            params=self._weights, q_node=self._q_model)
+        optimizer = self._optimizer(
+            params=self._weights,
+            q_node=self._q_model,
+            learning_rate=learning_rate
+        )
 
         self._weights = optimizer.optimize(
             data=x_data,
             targets=y_data,
+            verbose=verbose,
             epochs=epochs
         )
 
         return self._weights
-
-    @abstractmethod
-    def predict_proba(self):
-        pass
-
-    @abstractmethod
-    def predict(self):
-        pass
