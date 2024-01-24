@@ -8,13 +8,12 @@
 #
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
+import numpy as np
 import pennylane as qml
 
 from abc import abstractmethod
 from itertools import combinations
 from typing import Union
-
-from jax import numpy as jnp
 
 
 class FeatureMap:
@@ -24,7 +23,7 @@ class FeatureMap:
     @abstractmethod
     def apply(
             self,
-            features: jnp.ndarray
+            features: np.ndarray
     ) -> None:
         pass
 
@@ -36,7 +35,7 @@ class AngleEmbedding(FeatureMap):
 
     def apply(
             self,
-            features: jnp.ndarray
+            features: np.ndarray
     ) -> None:
         qml.AngleEmbedding(
             features=features,
@@ -58,7 +57,7 @@ class AmplitudeEmbedding(FeatureMap):
 
     def apply(
             self,
-            features: jnp.ndarray
+            features: np.ndarray
     ) -> None:
         qml.AmplitudeEmbedding(
             features=[x for x in features],
@@ -77,7 +76,7 @@ class ZZFeatureMap(FeatureMap):
 
     def _verify_data_dims(
             self,
-            features: jnp.ndarray
+            features: np.ndarray
     ) -> None:
         features_len = features.shape[-1]
         if not features_len <= self._n_qubits:
@@ -88,7 +87,7 @@ class ZZFeatureMap(FeatureMap):
 
     def apply(
             self,
-            features: jnp.ndarray
+            features: np.ndarray
     ) -> None:
         self._verify_data_dims(features)
 
@@ -100,7 +99,7 @@ class ZZFeatureMap(FeatureMap):
         for q0, q1 in list(combinations(range(n_load), 2)):
             qml.CZ(wires=[q0, q1])
             qml.RZ(
-                2.0 * (jnp.pi - features[q0]) * (jnp.pi - features[q1]),
+                2.0 * (np.pi - features[q0]) * (np.pi - features[q1]),
                 wires=[q1]
             )
             qml.CZ(wires=[q0, q1])
