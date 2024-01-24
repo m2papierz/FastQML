@@ -17,52 +17,94 @@ from jax import tree_util
 from abc import abstractmethod
 
 from jax import numpy as jnp
+from pennylane import numpy as qnp
 
 
 class Optimizer:
     def __init__(
             self,
             params: np.ndarray,
-            q_node: qml.qnode
+            q_node: qml.qnode,
+            learning_rate: float
 
     ):
         self._q_node = q_node
         self._params = params
+        self._learning_rate = learning_rate
 
     @abstractmethod
     def _loss_fn(self, weights, x_data, y_data):
         pass
 
     @abstractmethod
-    def optimize(self, data, targets, epochs):
+    def optimize(self, data, targets, verbose, epochs):
         pass
+
+
+class DefaultOptimizer(Optimizer):
+    def __init__(
+            self,
+            params: np.ndarray,
+            q_node: qml.qnode,
+            learning_rate: float
+
+    ):
+        super().__init__(
+            params=params,
+            q_node=q_node,
+            learning_rate=learning_rate
+        )
+
+    def _loss_fn(self, weights, x_data, y_data):
+        predictions = self._q_node(weights=weights, x_data=x_data)
+        loss = qnp.sum((y_data - predictions) ** 2 / len(x_data))
+        return loss
+
+    def optimize(self, data, targets, verbose, epochs):
+        _opt = qml.AdamOptimizer(self._learning_rate)
+        for it in range(epochs):
+            self._params = _opt.step(self._loss_fn, self._params, x_data=data, y_data=targets)
+            loss_val = self._loss_fn(self._params, data, targets)
+
+            print(f"Epoch: {it} - Loss: {loss_val}")
 
 
 class JITOptimizer(Optimizer):
     def __init__(
             self,
             params: np.ndarray,
-            q_node: qml.qnode
-
+            q_node: qml.qnode,
+            learning_rate: float
     ):
-        super().__init__(params=params, q_node=q_node)
-        self._opt = optax.adam(learning_rate=0.3)
+        super().__init__(
+            params=params,
+            q_node=q_node,
+            learning_rate=learning_rate
+        )
+        self._opt = optax.adam(learning_rate=learning_rate)
 
     def _tree_flatten(self):
         children = (self._params,)
-        aux_data = {'q_node': self._q_node}
+        aux_data = {
+            'q_node': self._q_node,
+            'learning_rate': self._learning_rate
+        }
         return children, aux_data
 
     @classmethod
     def _tree_unflatten(cls, aux_data, children):
-        return cls(*children, q_node=aux_data['q_node'])
+        return cls(
+            *children,
+            q_node=aux_data['q_node'],
+            learning_rate=aux_data['learning_rate']
+        )
 
     @classmethod
     def register_pytree_node(cls):
         tree_util.register_pytree_node(
-            cls,
-            cls._tree_flatten,
-            cls._tree_unflatten
+            nodetype=cls,
+            flatten_func=cls._tree_flatten,
+            unflatten_func=cls._tree_unflatten
         )
 
     @jax.jit
@@ -85,9 +127,7 @@ class JITOptimizer(Optimizer):
         params = optax.apply_updates(params, updates)
 
         def print_fn():
-            jax.debug.print("Step: {i}  Loss: {loss_val}", i=i, loss_val=loss_val)
-
-        # if print_training=True, print the loss every 5 steps
+            jax.debug.print("Epoch: {i} - Loss: {loss_val}", i=i, loss_val=loss_val)
         jax.lax.cond(print_training, print_fn, lambda: None)
 
         return params, opt_state, data, targets, print_training
@@ -97,15 +137,11 @@ class JITOptimizer(Optimizer):
             self,
             data: np.ndarray,
             targets: np.ndarray,
-            learning_rate: float,
             verbose: bool,
             epochs: int
     ):
-        opt = optax.adam(learning_rate=learning_rate)
-        opt_state = opt.init(self._params)
-
+        opt_state = self._opt.init(self._params)
         args = (self._params, opt_state, data, targets, verbose)
         (params, opt_state, _, _, _) = jax.lax.fori_loop(
-            0, epochs, self._update_step, args)
-
+            lower=0, upper=epochs, body_fun=self._update_step, init_val=args)
         return self._params
