@@ -8,54 +8,32 @@
 #
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
-
 import jax
-import jaxopt
+import optax
+import numpy as np
 import pennylane as qml
 
 from jax import tree_util
-from jax import numpy as jnp
 from abc import abstractmethod
+
+from jax import numpy as jnp
 
 
 class Optimizer:
     def __init__(
             self,
-            params: jnp.ndarray,
+            params: np.ndarray,
             q_node: qml.qnode
 
     ):
-        self._params = params
         self._q_node = q_node
+        self._params = params
 
     @abstractmethod
     def _loss_fn(self, weights, x_data, y_data):
         pass
 
     @abstractmethod
-    def _compute_loss_and_grad(self, params, data, target, epoch):
-        pass
-
-    @abstractmethod
-    def optimize(self, data, targets, epochs):
-        pass
-
-
-class DefaultOptimizer(Optimizer):
-    def __init__(
-            self,
-            params: jnp.ndarray,
-            q_node: qml.qnode
-
-    ):
-        super().__init__(params=params, q_node=q_node)
-
-    def _loss_fn(self, weights, x_data, y_data):
-        pass
-
-    def _compute_loss_and_grad(self, params, data, target, epoch):
-        pass
-
     def optimize(self, data, targets, epochs):
         pass
 
@@ -63,11 +41,12 @@ class DefaultOptimizer(Optimizer):
 class JITOptimizer(Optimizer):
     def __init__(
             self,
-            params: jnp.ndarray,
+            params: np.ndarray,
             q_node: qml.qnode
 
     ):
         super().__init__(params=params, q_node=q_node)
+        self._opt = optax.adam(learning_rate=0.3)
 
     def _tree_flatten(self):
         children = (self._params,)
@@ -89,47 +68,44 @@ class JITOptimizer(Optimizer):
     @jax.jit
     def _loss_fn(
             self,
-            weights: jnp.ndarray,
-            x_data: jnp.ndarray,
-            y_data: jnp.ndarray
+            weights: np.ndarray,
+            x_data: np.ndarray,
+            y_data: np.ndarray
     ):
-        predictions = self._q_node(x_data, weights)
+        predictions = self._q_node(weights=weights, x_data=x_data)
         loss = jnp.sum((y_data - predictions) ** 2 / len(x_data))
         return loss
 
     @jax.jit
-    def _compute_loss_and_grad(
-            self,
-            params: jnp.ndarray,
-            data: jnp.ndarray,
-            target: jnp.ndarray,
-            epoch: int
-    ):
-        loss_val, grad_val = jax.value_and_grad(
-            self._loss_fn)(params, data, target)
-        jax.debug.print(
-            "Epoch: {i} - Loss: {loss}", i=epoch, loss=loss_val)
-        return loss_val, grad_val
+    def _update_step(self, i, args):
+        params, opt_state, data, targets, print_training = args
+
+        loss_val, grads = jax.value_and_grad(self._loss_fn)(params, data, targets)
+        updates, opt_state = self._opt.update(grads, opt_state)
+        params = optax.apply_updates(params, updates)
+
+        def print_fn():
+            jax.debug.print("Step: {i}  Loss: {loss_val}", i=i, loss_val=loss_val)
+
+        # if print_training=True, print the loss every 5 steps
+        jax.lax.cond(print_training, print_fn, lambda: None)
+
+        return params, opt_state, data, targets, print_training
 
     @jax.jit
     def optimize(
             self,
-            data: jnp.ndarray,
-            targets: jnp.ndarray,
+            data: np.ndarray,
+            targets: np.ndarray,
+            learning_rate: float,
+            verbose: bool,
             epochs: int
     ):
-        opt = jaxopt.GradientDescent(
-            self._compute_loss_and_grad, stepsize=0.01, value_and_grad=True)
-        opt_state = opt.init_state(self._params)
+        opt = optax.adam(learning_rate=learning_rate)
+        opt_state = opt.init(self._params)
 
-        def update(i, args):
-            params, opt_state = opt.update(*args, i + 1)
-            return (params, opt_state, *args[2:])
-
-        args = (self._params, opt_state, data, targets)
-        (params, opt_state, _, _) = jax.lax.fori_loop(
-            lower=0, upper=epochs,
-            body_fun=update, init_val=args
-        )
+        args = (self._params, opt_state, data, targets, verbose)
+        (params, opt_state, _, _, _) = jax.lax.fori_loop(
+            0, epochs, self._update_step, args)
 
         return self._params
