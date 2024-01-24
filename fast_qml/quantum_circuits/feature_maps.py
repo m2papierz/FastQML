@@ -60,7 +60,7 @@ class AmplitudeEmbedding(FeatureMap):
             features: np.ndarray
     ) -> None:
         qml.AmplitudeEmbedding(
-            features=[x for x in features],
+            features=features,
             wires=range(self._n_qubits),
             normalize=self._normalize,
             pad_with=self._pad_with
@@ -78,11 +78,10 @@ class ZZFeatureMap(FeatureMap):
             self,
             features: np.ndarray
     ) -> None:
-        features_len = features.shape[-1]
-        if not features_len <= self._n_qubits:
+        if features.shape[-1] > self._n_qubits:
             raise ValueError(
-                f"Features must be of length {self._n_qubits}. "
-                f"Got length {features_len}."
+                f"Features must be of length {self._n_qubits} or "
+                f"less, got length {features.shape[-1]}."
             )
 
     def apply(
@@ -94,12 +93,12 @@ class ZZFeatureMap(FeatureMap):
         n_load = min(features.shape[-1], self._n_qubits)
         for i in range(n_load):
             qml.Hadamard(wires=[i])
-            qml.RZ(2.0 * features[i], wires=[i])
+            qml.RZ(2.0 * features[:, i], wires=[i])
 
         for q0, q1 in list(combinations(range(n_load), 2)):
             qml.CZ(wires=[q0, q1])
             qml.RZ(
-                2.0 * (np.pi - features[q0]) * (np.pi - features[q1]),
+                2.0 * (np.pi - features[:, q0]) * (np.pi - features[:, q1]),
                 wires=[q1]
             )
             qml.CZ(wires=[q0, q1])
