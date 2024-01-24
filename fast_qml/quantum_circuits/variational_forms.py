@@ -8,12 +8,12 @@
 #
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
+import numpy as np
 import pennylane as qml
 
 from typing import Any
 from abc import abstractmethod
 
-from jax import numpy as jnp
 from fast_qml.quantum_circuits.entanglement import EntanglementGenerator
 
 
@@ -49,7 +49,7 @@ class VariationalForm:
 
         self._rotation_blocks = [
             self._validate_gate(block_gate)
-            for block_gate in rotation_blocks or ['RZ']
+            for block_gate in rotation_blocks or ['RY']
         ]
 
         self._entanglement = EntanglementGenerator(
@@ -76,7 +76,7 @@ class VariationalForm:
 
     def _validate_params_dims(
             self,
-            params: jnp.ndarray
+            params: np.ndarray
     ) -> None:
         if len(params) != self.get_params_num():
             raise ValueError(
@@ -87,7 +87,7 @@ class VariationalForm:
     @abstractmethod
     def apply(
             self,
-            params: jnp.ndarray
+            params: np.ndarray
     ) -> None:
         pass
 
@@ -123,28 +123,19 @@ class TwoLocal(VariationalForm):
         )
 
     def get_params_num(self) -> int:
-        if self._skip_last_rotation:
-            layers_n = self._reps
-        else:
-            layers_n = self._reps + 1
+        if not self._skip_last_rotation:
+            self._reps += 1
         qubits_per_layer = self._n_qubits * len(self._rotation_blocks)
-        return layers_n * qubits_per_layer
+        return self._reps * qubits_per_layer
 
     def apply(
             self,
-            params: jnp.ndarray
+            params: np.ndarray
     ) -> None:
-        def rotations(r_num):
-            for i in range(self._n_qubits):
-                for j, rot_ in enumerate(self._rotation_blocks):
-                    rot_(params[r_num, j * self._n_qubits + i], wires=[i])
-
         for r in range(self._reps):
-            rotations(r)
-            self._entanglement.apply()
-
-        if not self._skip_last_rotation:
-            rotations(-1)
+            for q in range(self._n_qubits):
+                for j, rot_ in enumerate(self._rotation_blocks):
+                    rot_(params[r * self._n_qubits + q + j], wires=[q])
 
 
 class EfficientSU2(TwoLocal):
@@ -169,7 +160,7 @@ class EfficientSU2(TwoLocal):
             reps: int = 1
     ):
         if rotation_blocks is None:
-            self._rotation_blocks = [qml.RY, qml.RZ]
+            self._rotation_blocks = [qml.RY, qml.RX]
         elif len(rotation_blocks) != 2:
             raise ValueError(
                 "EfficientSU2 requires exactly 2 rotation blocks."
@@ -236,14 +227,14 @@ class TreeTensor(VariationalForm):
             reps=reps
         )
 
-        self._reps = int(jnp.log2(n_qubits))
+        self._reps = int(np.log2(n_qubits))
 
     def get_params_num(self) -> int:
         return 2 * self._n_qubits - 1
 
     def apply(
             self,
-            params: jnp.ndarray
+            params: np.ndarray
     ) -> None:
         self._validate_params_dims(params)
 
