@@ -1,9 +1,10 @@
 import pennylane as qml
-from fast_qml import numpy as np
 
 from abc import abstractmethod
 from itertools import combinations
 from typing import Union
+
+from jax import numpy as jnp
 
 
 class FeatureMap:
@@ -11,17 +12,11 @@ class FeatureMap:
         self._n_qubits = n_qubits
 
     @abstractmethod
-    def circuit(
+    def apply(
             self,
-            features: np.ndarray
+            features: jnp.ndarray
     ) -> None:
         pass
-
-    def __call__(
-            self,
-            features: np.ndarray
-    ) -> None:
-        self.circuit(features)
 
 
 class AngleEmbedding(FeatureMap):
@@ -29,9 +24,9 @@ class AngleEmbedding(FeatureMap):
         super().__init__(n_qubits=n_qubits)
         self._rotation = rotation
 
-    def circuit(
+    def apply(
             self,
-            features: np.ndarray
+            features: jnp.ndarray
     ) -> None:
         qml.AngleEmbedding(
             features=features,
@@ -51,9 +46,9 @@ class AmplitudeEmbedding(FeatureMap):
         self._normalize = normalize
         self._pad_with = pad_with
 
-    def circuit(
+    def apply(
             self,
-            features: np.ndarray
+            features: jnp.ndarray
     ) -> None:
         qml.AmplitudeEmbedding(
             features=[x for x in features],
@@ -72,22 +67,22 @@ class ZZFeatureMap(FeatureMap):
 
     def _verify_data_dims(
             self,
-            features: np.ndarray
+            features: jnp.ndarray
     ) -> None:
         features_len = features.shape[-1]
-        if not features_len == self._n_qubits:
+        if not features_len <= self._n_qubits:
             raise ValueError(
                 f"Features must be of length {self._n_qubits}. "
                 f"Got length {features_len}."
             )
 
-    def circuit(
+    def apply(
             self,
-            features: np.ndarray
+            features: jnp.ndarray
     ) -> None:
         self._verify_data_dims(features)
 
-        n_load = min(len(features), self._n_qubits)
+        n_load = min(features.shape[-1], self._n_qubits)
         for i in range(n_load):
             qml.Hadamard(wires=[i])
             qml.RZ(2.0 * features[i], wires=[i])
@@ -95,7 +90,7 @@ class ZZFeatureMap(FeatureMap):
         for q0, q1 in list(combinations(range(n_load), 2)):
             qml.CZ(wires=[q0, q1])
             qml.RZ(
-                2.0 * (np.pi - features[q0]) * (np.pi - features[q1]),
+                2.0 * (jnp.pi - features[q0]) * (jnp.pi - features[q1]),
                 wires=[q1]
             )
             qml.CZ(wires=[q0, q1])

@@ -3,7 +3,7 @@ import pennylane as qml
 from typing import Any
 from abc import abstractmethod
 
-from fast_qml import numpy as np
+from jax import numpy as jnp
 from fast_qml.quantum_circuits.entanglement import EntanglementGenerator
 
 
@@ -61,23 +61,23 @@ class VariationalForm:
             )
 
     @abstractmethod
-    def get_params_dims(self):
+    def get_params_num(self):
         pass
 
     def _validate_params_dims(
             self,
-            params: np.ndarray
+            params: jnp.ndarray
     ) -> None:
-        if params.shape != self.get_params_dims():
+        if len(params) != self.get_params_num():
             raise ValueError(
                 f"Invalid parameters shape. "
-                f"Expected {self.get_params_dims()}, got {params.shape}."
+                f"Expected {self.get_params_num()}, got {len(params)}."
             )
 
     @abstractmethod
-    def circuit(
+    def apply(
             self,
-            params: np.ndarray
+            params: jnp.ndarray
     ) -> None:
         pass
 
@@ -112,24 +112,18 @@ class TwoLocal(VariationalForm):
             reps=reps
         )
 
-    def get_params_dims(self) -> tuple:
+    def get_params_num(self) -> int:
         if self._skip_last_rotation:
             layers_n = self._reps
         else:
             layers_n = self._reps + 1
-        gate_params_n = 1
-        return (
-            layers_n,
-            self._n_qubits * len(self._rotation_blocks),
-            gate_params_n
-        )
+        qubits_per_layer = self._n_qubits * len(self._rotation_blocks)
+        return layers_n * qubits_per_layer
 
-    def circuit(
+    def apply(
             self,
-            params: np.ndarray
+            params: jnp.ndarray
     ) -> None:
-        self._validate_params_dims(params)
-
         def rotations(r_num):
             for i in range(self._n_qubits):
                 for j, rot_ in enumerate(self._rotation_blocks):
@@ -232,27 +226,23 @@ class TreeTensor(VariationalForm):
             reps=reps
         )
 
-        self._reps = int(np.log2(n_qubits))
+        self._reps = int(jnp.log2(n_qubits))
 
-    def get_params_dims(self) -> tuple:
-        gate_params_n = 1
-        return (
-            2 * self._n_qubits - 1,
-            gate_params_n
-        )
+    def get_params_num(self) -> int:
+        return 2 * self._n_qubits - 1
 
-    def circuit(
+    def apply(
             self,
-            params: np.ndarray
+            params: jnp.ndarray
     ) -> None:
         self._validate_params_dims(params)
 
         for i in range(self._n_qubits):
-            qml.RY(float(params[i]), wires=[i])
+            qml.RY(params[i], wires=[i])
 
         n_qubits = self._n_qubits
         for r in range(1, self._reps + 1):
             for s in range(0, 2 ** (self._reps - r)):
                 qml.CNOT(wires=[(s * 2 ** r), (s * 2 ** r) + (2 ** (r - 1))])
-                qml.RY(float(params[n_qubits + s]), wires=[(s * 2 ** r)])
+                qml.RY(params[n_qubits + s], wires=[(s * 2 ** r)])
             n_qubits += 2 ** (self._reps - r)
