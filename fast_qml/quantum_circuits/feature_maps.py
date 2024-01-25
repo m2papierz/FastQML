@@ -15,8 +15,12 @@ from typing import Union, Callable
 import numpy as np
 import pennylane as qml
 
+from fast_qml.utils import validate_function_args
+
 
 class FeatureMap:
+    _expected_args = ['features']
+
     def __init__(
             self,
             n_qubits: int,
@@ -27,13 +31,19 @@ class FeatureMap:
         if map_func is None:
             self._map_func = self._set_map_func
         else:
+            if not validate_function_args(map_func, self._expected_args):
+                raise ValueError(
+                    f"The variational_form function must "
+                    f"have the arguments: {self._expected_args}"
+                )
+
             self._map_func = map_func
 
     @abstractmethod
     def _set_map_func(
             self,
             features: np.ndarray
-    ):
+    ) -> None:
         pass
 
     def apply(
@@ -55,14 +65,14 @@ class AngleEmbedding(FeatureMap):
     def _set_map_func(
             self,
             features: np.ndarray
-    ):
+    ) -> None:
         def map_func():
             qml.AngleEmbedding(
                 features=features,
                 wires=range(self._n_qubits),
                 rotation=self._rotation
             )
-        return map_func
+        return map_func()
 
 
 class AmplitudeEmbedding(FeatureMap):
@@ -79,7 +89,7 @@ class AmplitudeEmbedding(FeatureMap):
     def _set_map_func(
             self,
             features: np.ndarray
-    ):
+    ) -> None:
         def map_func():
             qml.AmplitudeEmbedding(
                 features=features,
@@ -87,7 +97,7 @@ class AmplitudeEmbedding(FeatureMap):
                 normalize=self._normalize,
                 pad_with=self._pad_with
             )
-        return map_func
+        return map_func()
 
 
 class IQPEmbedding(FeatureMap):
@@ -100,13 +110,13 @@ class IQPEmbedding(FeatureMap):
     def _set_map_func(
             self,
             features: np.ndarray
-    ):
+    ) -> None:
         def map_func():
             qml.IQPEmbedding(
                 features=features,
                 wires=range(self._n_qubits)
             )
-        return map_func
+        return map_func()
 
 
 class ZZFeatureMap(FeatureMap):
@@ -129,7 +139,7 @@ class ZZFeatureMap(FeatureMap):
     def _set_map_func(
             self,
             features: np.ndarray
-    ):
+    ) -> None:
         def map_func():
             self._verify_data_dims(features)
 
@@ -145,4 +155,4 @@ class ZZFeatureMap(FeatureMap):
                     wires=[q1]
                 )
                 qml.CZ(wires=[q0, q1])
-        return map_func
+        return map_func()
