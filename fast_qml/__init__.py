@@ -7,7 +7,7 @@ class QubitDevice(Enum):
     CPU_JAX = 'cpu.jax'
 
 
-DEVICE = QubitDevice.CPU
+DEVICE = QubitDevice.CPU.value
 
 
 def update(device: str):
