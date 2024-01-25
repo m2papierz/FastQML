@@ -55,7 +55,7 @@ class EstimatorBase:
 
     def _initialize_weights(self) -> np.ndarray:
         weights = 0.1 * qnp.random.random(
-            self._ansatz.get_params_num(), requires_grad=True)
+            self._ansatz.params_num, requires_grad=True)
         return weights
 
     def _q_model(
