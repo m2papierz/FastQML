@@ -26,7 +26,7 @@ def _circular(
 ) -> None:
     for i in range(n_qubits - 1):
         controlled_gate(wires=[i, i + 1])
-    controlled_gate(wires=[n_qubits, 0])
+    controlled_gate(wires=[n_qubits - 1, 0])
 
 
 def _full(
