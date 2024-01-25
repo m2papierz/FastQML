@@ -8,6 +8,8 @@
 #
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
+from abc import abstractmethod
+
 import fast_qml
 import numpy as np
 import pennylane as qml
@@ -20,7 +22,7 @@ from fast_qml.quantum_circuits.variational_forms import VariationalForm
 from fast_qml.machine_learning.optimizer import DefaultOptimizer, JITOptimizer
 
 
-class VariationalModel:
+class EstimatorBase:
     def __init__(
             self,
             n_qubits: int,
@@ -32,8 +34,6 @@ class VariationalModel:
         self._feature_map = feature_map
         self._ansatz = ansatz
         self._measurement_op = measurement_op
-
-        self._weights = self._init_weights()
 
         if fast_qml.DEVICE == QubitDevice.CPU.value:
             self._interface = 'auto'
@@ -51,7 +51,9 @@ class VariationalModel:
         else:
             raise NotImplementedError()
 
-    def _init_weights(self) -> np.ndarray:
+        self._weights = self._initialize_weights()
+
+    def _initialize_weights(self) -> np.ndarray:
         weights = 0.1 * qnp.random.random(
             self._ansatz.get_params_num(), requires_grad=True)
         return weights
@@ -68,13 +70,40 @@ class VariationalModel:
             return qml.expval(self._measurement_op)
         return _quantum_circuit()
 
+    @abstractmethod
     def fit(
             self,
             x_data: np.ndarray,
             y_data: np.ndarray,
             learning_rate: float,
-            verbose: bool,
-            epochs: int
+            num_epochs: int,
+            verbose: bool
+    ):
+        pass
+
+
+class SimpleQuantumEstimator(EstimatorBase):
+    def __init__(
+            self,
+            n_qubits: int,
+            feature_map: FeatureMap,
+            ansatz: VariationalForm,
+            measurement_op: qml.operation.Operation
+    ):
+        super().__init__(
+            n_qubits=n_qubits,
+            feature_map=feature_map,
+            ansatz=ansatz,
+            measurement_op=measurement_op
+        )
+
+    def fit(
+            self,
+            x_data: np.ndarray,
+            y_data: np.ndarray,
+            learning_rate: float,
+            num_epochs: int,
+            verbose: bool
     ):
         optimizer = self._optimizer(
             params=self._weights,
@@ -85,8 +114,8 @@ class VariationalModel:
         self._weights = optimizer.optimize(
             data=x_data,
             targets=y_data,
-            verbose=verbose,
-            epochs=epochs
+            epochs=num_epochs,
+            verbose=verbose
         )
 
         return self._weights
