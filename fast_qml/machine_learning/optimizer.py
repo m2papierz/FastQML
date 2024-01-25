@@ -142,6 +142,6 @@ class JITOptimizer(Optimizer):
     ):
         opt_state = self._opt.init(self._params)
         args = (self._params, opt_state, data, targets, verbose)
-        (params, opt_state, _, _, _) = jax.lax.fori_loop(
+        (self._params, opt_state, _, _, _) = jax.lax.fori_loop(
             lower=0, upper=epochs, body_fun=self._update_step, init_val=args)
         return self._params

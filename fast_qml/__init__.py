@@ -16,6 +16,7 @@ def update(device: str):
 
     if device == 'cpu.jax':
         j_cfg.update("jax_platform_name", "cpu")
+        j_cfg.update("jax_enable_x64", True)
 
     globals()['DEVICE'] = device
 
