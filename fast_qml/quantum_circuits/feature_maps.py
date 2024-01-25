@@ -8,40 +8,61 @@
 #
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
+from abc import abstractmethod
+from itertools import combinations
+from typing import Union, Callable
+
 import numpy as np
 import pennylane as qml
 
-from abc import abstractmethod
-from itertools import combinations
-from typing import Union
-
 
 class FeatureMap:
-    def __init__(self, n_qubits: int):
+    def __init__(
+            self,
+            n_qubits: int,
+            map_func: Callable = None
+    ):
         self._n_qubits = n_qubits
 
+        if map_func is None:
+            self._map_func = self._set_map_func
+        else:
+            self._map_func = map_func
+
     @abstractmethod
+    def _set_map_func(
+            self,
+            features: np.ndarray
+    ):
+        pass
+
     def apply(
             self,
             features: np.ndarray
     ) -> None:
-        pass
+        self._map_func(features=features)
 
 
 class AngleEmbedding(FeatureMap):
-    def __init__(self, n_qubits, rotation: str = 'X'):
+    def __init__(
+            self,
+            n_qubits: int,
+            rotation: str = 'X'
+    ):
         super().__init__(n_qubits=n_qubits)
         self._rotation = rotation
 
-    def apply(
+    def _set_map_func(
             self,
             features: np.ndarray
-    ) -> None:
-        qml.AngleEmbedding(
-            features=features,
-            wires=range(self._n_qubits),
-            rotation=self._rotation
-        )
+    ):
+        def map_func():
+            qml.AngleEmbedding(
+                features=features,
+                wires=range(self._n_qubits),
+                rotation=self._rotation
+            )
+        return map_func
 
 
 class AmplitudeEmbedding(FeatureMap):
@@ -55,16 +76,18 @@ class AmplitudeEmbedding(FeatureMap):
         self._normalize = normalize
         self._pad_with = pad_with
 
-    def apply(
+    def _set_map_func(
             self,
             features: np.ndarray
-    ) -> None:
-        qml.AmplitudeEmbedding(
-            features=features,
-            wires=range(self._n_qubits),
-            normalize=self._normalize,
-            pad_with=self._pad_with
-        )
+    ):
+        def map_func():
+            qml.AmplitudeEmbedding(
+                features=features,
+                wires=range(self._n_qubits),
+                normalize=self._normalize,
+                pad_with=self._pad_with
+            )
+        return map_func
 
 
 class IQPEmbedding(FeatureMap):
@@ -74,14 +97,16 @@ class IQPEmbedding(FeatureMap):
     ):
         super().__init__(n_qubits=n_qubits)
 
-    def apply(
+    def _set_map_func(
             self,
             features: np.ndarray
-    ) -> None:
-        qml.IQPEmbedding(
-            features=features,
-            wires=range(self._n_qubits)
-        )
+    ):
+        def map_func():
+            qml.IQPEmbedding(
+                features=features,
+                wires=range(self._n_qubits)
+            )
+        return map_func
 
 
 class ZZFeatureMap(FeatureMap):
@@ -101,21 +126,23 @@ class ZZFeatureMap(FeatureMap):
                 f"less, got length {features.shape[-1]}."
             )
 
-    def apply(
+    def _set_map_func(
             self,
             features: np.ndarray
-    ) -> None:
-        self._verify_data_dims(features)
+    ):
+        def map_func():
+            self._verify_data_dims(features)
 
-        n_load = min(features.shape[-1], self._n_qubits)
-        for i in range(n_load):
-            qml.Hadamard(wires=[i])
-            qml.RZ(2.0 * features[:, i], wires=[i])
+            n_load = min(features.shape[-1], self._n_qubits)
+            for i in range(n_load):
+                qml.Hadamard(wires=[i])
+                qml.RZ(2.0 * features[:, i], wires=[i])
 
-        for q0, q1 in list(combinations(range(n_load), 2)):
-            qml.CZ(wires=[q0, q1])
-            qml.RZ(
-                2.0 * (np.pi - features[:, q0]) * (np.pi - features[:, q1]),
-                wires=[q1]
-            )
-            qml.CZ(wires=[q0, q1])
+            for q0, q1 in list(combinations(range(n_load), 2)):
+                qml.CZ(wires=[q0, q1])
+                qml.RZ(
+                    2.0 * (np.pi - features[:, q0]) * (np.pi - features[:, q1]),
+                    wires=[q1]
+                )
+                qml.CZ(wires=[q0, q1])
+        return map_func
