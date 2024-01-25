@@ -68,6 +68,8 @@ class DefaultOptimizer(Optimizer):
 
             print(f"Epoch: {it} - Loss: {loss_val}")
 
+        return self._params
+
 
 class JITOptimizer(Optimizer):
     def __init__(
