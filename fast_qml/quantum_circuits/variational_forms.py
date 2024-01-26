@@ -8,7 +8,6 @@
 #
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
-import warnings
 from abc import abstractmethod
 from typing import Any, Union, Callable
 
@@ -21,86 +20,89 @@ from fast_qml.quantum_circuits.entanglement import EntanglementGenerator
 
 class VariationalForm:
 
-    _expected_args = ['params']
-
-    GATE_MAP = {
+    ROT_GATE_MAP = {
         'RX': qml.RX, 'RY': qml.RY, 'RZ': qml.RZ
     }
 
     def __init__(
             self,
             n_qubits: int,
-            variational_func: Callable = None,
-            entanglement: Union[str, list[int]] = None,
-            rotation_blocks: list[str] = None,
             controlled_gate: str = None,
-            uniform_structure: bool = True,
             reps: int = 1
     ):
         self._n_qubits = n_qubits
+        self._controlled_gate = controlled_gate
         self._reps = reps
-
-        if variational_func is not None:
-            if entanglement is not None or controlled_gate is not None:
-                warnings.warn(
-                    message="If variational_func is given, entanglement "
-                            "and controlled_gate will be ignored.",
-                    category=UserWarning
-                )
-
-            if not validate_function_args(variational_func, self._expected_args):
-                raise ValueError(
-                    f"The variational_form function must "
-                    f"have the arguments: {self._expected_args}"
-                )
-            self._variational_func = variational_func
-        else:
-            self._entanglement = EntanglementGenerator(
-                n_qubits=n_qubits,
-                c_gate=controlled_gate,
-                entanglement=entanglement
-            )
-
-            self._variational_func = self._set_variational_func
-
-        self._rotation_blocks = [
-            self._validate_gate(block_gate)
-            for block_gate in rotation_blocks or ['RY']
-        ]
-
-        if uniform_structure:
-            self._func_params_n = self._get_func_params_num()
-
-    @property
-    def params_num(self) -> int:
-        return self._reps * self._func_params_n
-
-    def _get_func_params_num(self) -> int:
-        rot_block_n = len(self._rotation_blocks)
-        aux_params_num = self._n_qubits * rot_block_n
-
-        with qml.tape.QuantumTape() as tape:
-            self._variational_func(np.zeros(shape=aux_params_num))
-
-        return tape.num_params
 
     def _validate_gate(
             self,
             c_gate: str
     ) -> Any:
-        if c_gate not in self.GATE_MAP:
+        if c_gate not in self.ROT_GATE_MAP:
             raise ValueError(
-                "Invalid rotation gate type. "
-                "Supported types are 'RX', 'RY', and 'RZ'."
+                f"Invalid rotation gate type. "
+                f"Supported types are {self.ROT_GATE_MAP.keys()}."
             )
-        return self.GATE_MAP[c_gate]
+        return self.ROT_GATE_MAP[c_gate]
+
+    @property
+    def params_num(self):
+        return self._get_params_num()
 
     @abstractmethod
-    def _set_variational_func(
+    def _get_params_num(self) -> int:
+        pass
+
+    @abstractmethod
+    def _variational_func(
             self,
             params: np.ndarray
-    ) -> Callable:
+    ) -> None:
         pass
+
+    @abstractmethod
+    def apply(
+            self,
+            params: np.ndarray
+    ) -> None:
+        pass
+
+
+class Ansatz(VariationalForm):
+    _expected_args = ['params']
+
+    def __init__(
+            self,
+            n_qubits: int,
+            parameters_num: int,
+            variational_func: Callable = None,
+            reps: int = 1
+    ):
+
+        self._parameters_num = parameters_num
+
+        super().__init__(
+            n_qubits=n_qubits,
+            controlled_gate='CX',
+            reps=reps
+        )
+
+        if not validate_function_args(variational_func, self._expected_args):
+            raise ValueError(
+                f"The variational_form function must "
+                f"have the arguments: {self._expected_args}"
+            )
+
+        self._variational_function = variational_func
+
+    def _get_params_num(self) -> int:
+        return self._reps * self._parameters_num
+
+    def _variational_func(
+            self,
+            params: np.ndarray
+    ) -> None:
+        return self._variational_function(params)
 
     def apply(
             self,
@@ -112,9 +114,9 @@ class VariationalForm:
                 f"Expected {self.params_num}, got {len(params)}."
             )
 
-        qubits_n = self._func_params_n
+        block_params_n = self._parameters_num
         for r in range(self._reps):
-            params_subset = params[r * qubits_n: (r + 1) * qubits_n]
+            params_subset = params[r * block_params_n: (r + 1) * block_params_n]
             self._variational_func(params=params_subset)
 
 
@@ -124,27 +126,53 @@ class TwoLocal(VariationalForm):
             n_qubits: int,
             rotation_blocks: list[str] = None,
             controlled_gate: str = 'CX',
-            entanglement: str = 'linear',
+            entanglement: Union[str, list[list[int]]] = 'linear',
             reps: int = 1
     ):
         super().__init__(
             n_qubits=n_qubits,
-            rotation_blocks=rotation_blocks,
             controlled_gate=controlled_gate,
-            entanglement=entanglement,
             reps=reps
         )
 
-    def _set_variational_func(
+        self._entanglement = EntanglementGenerator(
+            n_qubits=n_qubits,
+            c_gate=controlled_gate,
+            entanglement=entanglement
+        )
+
+        self._rotation_blocks = [
+            self._validate_gate(block_gate)
+            for block_gate in rotation_blocks or ['RY']
+        ]
+
+    def _get_params_num(self) -> int:
+        rot_block_n = len(self._rotation_blocks)
+        return self._reps * self._n_qubits * rot_block_n
+
+    def _variational_func(
             self,
             params: np.ndarray
     ) -> None:
-        def variational_func():
-            for j, rot_ in enumerate(self._rotation_blocks):
-                for q in range(self._n_qubits):
-                    rot_(params[j * self._n_qubits + q], wires=[q])
-            self._entanglement.apply()
-        return variational_func()
+        for j, rot_ in enumerate(self._rotation_blocks):
+            for q in range(self._n_qubits):
+                rot_(params[j * self._n_qubits + q], wires=[q])
+        self._entanglement.apply()
+
+    def apply(
+            self,
+            params: np.ndarray
+    ) -> None:
+        if len(params) != self.params_num:
+            ValueError(
+                f"Invalid parameters shape. "
+                f"Expected {self.params_num}, got {len(params)}."
+            )
+
+        block_params_n = int(self._get_params_num() / self._reps)
+        for r in range(self._reps):
+            params_subset = params[r * block_params_n: (r + 1) * block_params_n]
+            self._variational_func(params=params_subset)
 
 
 class EfficientSU2(TwoLocal):
@@ -184,37 +212,30 @@ class TreeTensor(VariationalForm):
                 "to be a power of two."
             )
 
+        reps_num = int(np.log2(n_qubits))
+
         super().__init__(
             n_qubits=n_qubits,
-            rotation_blocks=None,
             controlled_gate=controlled_gate,
-            reps=1,
-            uniform_structure=False
+            reps=reps_num
         )
 
-        self._reps = int(np.log2(n_qubits))
-        self._func_params_n = self.params_num
-
-    @property
-    def params_num(self) -> int:
+    def _get_params_num(self) -> int:
         return 2 * self._n_qubits - 1
 
-    def _set_variational_func(
+    def _variational_func(
             self,
             params: np.ndarray
     ) -> None:
-        def variational_func():
-            for i in range(self._n_qubits):
-                qml.RY(params[i], wires=[i])
+        for i in range(self._n_qubits):
+            qml.RY(params[i], wires=[i])
 
-            n_qubits = self._n_qubits
-            for r in range(1, self._reps + 1):
-                for s in range(0, 2 ** (self._reps - r)):
-                    qml.CNOT(wires=[(s * 2 ** r), (s * 2 ** r) + (2 ** (r - 1))])
-                    qml.RY(params[n_qubits + s], wires=[(s * 2 ** r)])
-                n_qubits += 2 ** (self._reps - r)
-
-        return variational_func()
+        n_qubits = self._n_qubits
+        for r in range(1, self._reps + 1):
+            for s in range(0, 2 ** (self._reps - r)):
+                qml.CNOT(wires=[(s * 2 ** r), (s * 2 ** r) + (2 ** (r - 1))])
+                qml.RY(params[n_qubits + s], wires=[(s * 2 ** r)])
+            n_qubits += 2 ** (self._reps - r)
 
     def apply(
             self,
