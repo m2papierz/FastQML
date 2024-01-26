@@ -8,8 +8,10 @@
 #
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
+from typing import Any, Callable, Union
+
+import numpy as np
 import pennylane as qml
-from typing import Any, Callable
 
 
 def _linear(
@@ -20,13 +22,30 @@ def _linear(
         controlled_gate(wires=[i, i + 1])
 
 
+def _reverse_linear(
+        n_qubits: int,
+        controlled_gate: Any
+) -> None:
+    for i in range(n_qubits - 1, 0, -1):
+        controlled_gate(wires=[i, i - 1])
+
+
 def _circular(
         n_qubits: int,
         controlled_gate: Any
 ) -> None:
-    for i in range(n_qubits - 1):
-        controlled_gate(wires=[i, i + 1])
+    _linear(
+        n_qubits=n_qubits, controlled_gate=controlled_gate)
     controlled_gate(wires=[n_qubits - 1, 0])
+
+
+def _reverse_circular(
+        n_qubits: int,
+        controlled_gate: Any
+) -> None:
+    _reverse_linear(
+        n_qubits=n_qubits, controlled_gate=controlled_gate)
+    controlled_gate(wires=[0, n_qubits - 1])
 
 
 def _full(
@@ -54,7 +73,9 @@ class EntanglementGenerator:
 
     ENTANGLEMENT_MAP = {
         'linear': _linear,
+        'linear_reverse': _reverse_linear,
         'circular': _circular,
+        'reverse_circular': _reverse_circular,
         'full': _full
     }
 
@@ -62,22 +83,22 @@ class EntanglementGenerator:
             self,
             n_qubits: int,
             c_gate: str = 'CX',
-            entanglement: str = 'linear'
+            entanglement: Union[str, list[list[int]]] = 'linear'
     ):
         self._n_qubits = n_qubits
-        self._entanglement = entanglement
         self._c_gate = self._get_gate(c_gate)
+        self._entanglement = entanglement
 
     def _get_gate(self, c_gate: str) -> Any:
         if c_gate in self.GATE_MAP:
             return self.GATE_MAP[c_gate]
         else:
             raise ValueError(
-                "Invalid controlled gate type. "
-                "Supported types are 'CX', 'CY', and 'CZ'."
+                f"Invalid controlled gate type. "
+                f"Supported types are {self.GATE_MAP.keys()}."
             )
 
-    def get_entanglement(
+    def _get_entanglement_function(
             self,
             entanglement: str
     ) -> Callable[[int, Any], None]:
@@ -85,11 +106,35 @@ class EntanglementGenerator:
             return self.ENTANGLEMENT_MAP[entanglement]
         else:
             raise ValueError(
-                "Invalid entanglement type."
-                "Supported types are 'linear', 'circular', and 'full'."
+                f"Invalid entanglement type."
+                f"Supported types are {self.ENTANGLEMENT_MAP.keys()}."
             )
 
+    def _get_entanglement_scheme(
+            self,
+            entanglement: list[list[int]]
+    ):
+        if not all(isinstance(pair, list) and len(pair) == 2 for pair in entanglement):
+            raise ValueError(
+                "Entanglement scheme must be a list of qubit pairs."
+            )
+
+        qubits_needed = np.max(np.array(entanglement)) + 1
+        if qubits_needed > self._n_qubits:
+            raise ValueError(
+                f"Given entanglement scheme needs {qubits_needed} qubits, "
+                f"but circuit uses {self._n_qubits}."
+            )
+
+        for wires_pairs in entanglement:
+            self._c_gate(wires=wires_pairs)
+
     def apply(self) -> None:
-        self.get_entanglement(
-            entanglement=self._entanglement
-        )(self._n_qubits, self._c_gate)
+        if isinstance(self._entanglement, list):
+            self._get_entanglement_scheme(
+                entanglement=self._entanglement
+            )
+        else:
+            self._get_entanglement_function(
+                entanglement=self._entanglement
+            )(self._n_qubits, self._c_gate)
