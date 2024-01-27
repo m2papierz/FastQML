@@ -8,32 +8,33 @@
 #
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
+from typing import Callable
 from abc import abstractmethod
 
-import fast_qml
 import numpy as np
 import pennylane as qml
 
-from pennylane import numpy as qnp
-
+import fast_qml
 from fast_qml import QubitDevice
 from fast_qml.quantum_circuits.feature_maps import FeatureMap
 from fast_qml.quantum_circuits.variational_forms import VariationalForm
 from fast_qml.machine_learning.optimizer import DefaultOptimizer, JITOptimizer
 
 
-class EstimatorBase:
+class QuantumEstimator:
     def __init__(
             self,
             n_qubits: int,
             feature_map: FeatureMap,
             ansatz: VariationalForm,
-            measurement_op: qml.operation.Operation
+            measurement_op: qml.operation.Operation,
+            loss_fn: Callable
     ):
         self._n_qubits = n_qubits
         self._feature_map = feature_map
         self._ansatz = ansatz
         self._measurement_op = measurement_op
+        self._loss_fn = loss_fn
 
         if fast_qml.DEVICE == QubitDevice.CPU.value:
             self._interface = 'auto'
@@ -54,21 +55,25 @@ class EstimatorBase:
         self._weights = self._initialize_weights()
 
     def _initialize_weights(self) -> np.ndarray:
-        weights = 0.1 * qnp.random.random(
+        weights = 0.1 * qml.numpy.random.random(
             self._ansatz.params_num, requires_grad=True)
         return weights
 
+    @abstractmethod
+    def _quantum_layer(
+            self,
+            weights: np.ndarray,
+            x_data: np.ndarray
+    ):
+        pass
+
+    @abstractmethod
     def _q_model(
             self,
             weights: np.ndarray,
             x_data: np.ndarray
     ):
-        @qml.qnode(device=self._device, interface=self._interface)
-        def _quantum_circuit():
-            self._feature_map.apply(features=x_data)
-            self._ansatz.apply(params=weights)
-            return qml.expval(self._measurement_op)
-        return _quantum_circuit()
+        pass
 
     @abstractmethod
     def fit(
@@ -80,42 +85,3 @@ class EstimatorBase:
             verbose: bool
     ):
         pass
-
-
-class SimpleQuantumEstimator(EstimatorBase):
-    def __init__(
-            self,
-            n_qubits: int,
-            feature_map: FeatureMap,
-            ansatz: VariationalForm,
-            measurement_op: qml.operation.Operation
-    ):
-        super().__init__(
-            n_qubits=n_qubits,
-            feature_map=feature_map,
-            ansatz=ansatz,
-            measurement_op=measurement_op
-        )
-
-    def fit(
-            self,
-            x_data: np.ndarray,
-            y_data: np.ndarray,
-            learning_rate: float,
-            num_epochs: int,
-            verbose: bool
-    ):
-        optimizer = self._optimizer(
-            params=self._weights,
-            q_node=self._q_model,
-            learning_rate=learning_rate
-        )
-
-        self._weights = optimizer.optimize(
-            data=x_data,
-            targets=y_data,
-            epochs=num_epochs,
-            verbose=verbose
-        )
-
-        return self._weights
