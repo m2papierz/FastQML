@@ -8,16 +8,15 @@
 #
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
+from typing import Callable
+from abc import abstractmethod
+
 import jax
 import optax
 import numpy as np
 import pennylane as qml
 
 from jax import tree_util
-from abc import abstractmethod
-
-from jax import numpy as jnp
-from pennylane import numpy as qnp
 
 
 class Optimizer:
@@ -25,16 +24,23 @@ class Optimizer:
             self,
             params: np.ndarray,
             q_node: qml.qnode,
+            loss_fn: Callable,
             learning_rate: float
-
     ):
-        self._q_node = q_node
         self._params = params
+        self._q_node = q_node
+        self._loss_function = loss_fn
         self._learning_rate = learning_rate
 
-    @abstractmethod
-    def _loss_fn(self, weights, x_data, y_data):
-        pass
+    def _loss_fn(
+            self,
+            weights: np.ndarray,
+            x_data: np.ndarray,
+            y_data: np.ndarray
+    ):
+        predictions = self._q_node(weights=weights, x_data=x_data)
+        loss = self._loss_function(y_real=y_data, y_pred=predictions)
+        return loss
 
     @abstractmethod
     def optimize(self, data, targets, verbose, epochs):
@@ -46,24 +52,22 @@ class DefaultOptimizer(Optimizer):
             self,
             params: np.ndarray,
             q_node: qml.qnode,
-            learning_rate: float
+            learning_rate: float,
+            loss_fn: Callable
 
     ):
         super().__init__(
             params=params,
             q_node=q_node,
+            loss_fn=loss_fn,
             learning_rate=learning_rate
         )
-
-    def _loss_fn(self, weights, x_data, y_data):
-        predictions = self._q_node(weights=weights, x_data=x_data)
-        loss = qnp.sum((y_data - predictions) ** 2 / len(x_data))
-        return loss
 
     def optimize(self, data, targets, verbose, epochs):
         _opt = qml.AdamOptimizer(self._learning_rate)
         for it in range(epochs):
-            self._params = _opt.step(self._loss_fn, self._params, x_data=data, y_data=targets)
+            self._params = _opt.step(
+                self._loss_fn, self._params, x_data=data, y_data=targets)
             loss_val = self._loss_fn(self._params, data, targets)
 
             print(f"Epoch: {it} - Loss: {loss_val}")
@@ -76,11 +80,13 @@ class JITOptimizer(Optimizer):
             self,
             params: np.ndarray,
             q_node: qml.qnode,
+            loss_fn: Callable,
             learning_rate: float
     ):
         super().__init__(
             params=params,
             q_node=q_node,
+            loss_fn=loss_fn,
             learning_rate=learning_rate
         )
         self._opt = optax.adam(learning_rate=learning_rate)
@@ -89,7 +95,8 @@ class JITOptimizer(Optimizer):
         children = (self._params,)
         aux_data = {
             'q_node': self._q_node,
-            'learning_rate': self._learning_rate
+            'learning_rate': self._learning_rate,
+            'loss_fn': self._loss_function
         }
         return children, aux_data
 
@@ -98,7 +105,8 @@ class JITOptimizer(Optimizer):
         return cls(
             *children,
             q_node=aux_data['q_node'],
-            learning_rate=aux_data['learning_rate']
+            learning_rate=aux_data['learning_rate'],
+            loss_fn=aux_data['loss_fn']
         )
 
     @classmethod
@@ -110,21 +118,11 @@ class JITOptimizer(Optimizer):
         )
 
     @jax.jit
-    def _loss_fn(
-            self,
-            weights: np.ndarray,
-            x_data: np.ndarray,
-            y_data: np.ndarray
-    ):
-        predictions = self._q_node(weights=weights, x_data=x_data)
-        loss = jnp.sum((y_data - predictions) ** 2 / len(x_data))
-        return loss
-
-    @jax.jit
     def _update_step(self, i, args):
         params, opt_state, data, targets, print_training = args
 
-        loss_val, grads = jax.value_and_grad(self._loss_fn)(params, data, targets)
+        loss_val, grads = jax.value_and_grad(
+            self._loss_fn)(params, data, targets)
         updates, opt_state = self._opt.update(grads, opt_state)
         params = optax.apply_updates(params, updates)
 
