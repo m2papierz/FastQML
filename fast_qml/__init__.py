@@ -14,7 +14,7 @@ def update(device: str):
     if device not in [d.value for d in QubitDevice]:
         raise ValueError()
 
-    if device == 'cpu.jax':
+    if device == QubitDevice.CPU_JAX.value:
         j_cfg.update("jax_platform_name", "cpu")
         j_cfg.update("jax_enable_x64", True)
 
