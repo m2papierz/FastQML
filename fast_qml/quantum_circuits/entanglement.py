@@ -128,7 +128,7 @@ class EntanglementGenerator:
 
     ENTANGLEMENT_MAP = {
         'linear': _linear,
-        'linear_reverse': _reverse_linear,
+        'reverse_linear': _reverse_linear,
         'circular': _circular,
         'reverse_circular': _reverse_circular,
         'full': _full
