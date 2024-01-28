@@ -8,6 +8,10 @@
 #
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
+"""
+Module providing functionalities for feature maps for encoding classical data into quantum states.
+"""
+
 from abc import abstractmethod
 from itertools import combinations
 from typing import Union, Callable
@@ -19,6 +23,17 @@ from fast_qml.utils import validate_function_args
 
 
 class FeatureMap:
+    """
+    Abstract base class for quantum feature maps.
+
+    Args:
+        n_qubits: Number of qubits in the quantum circuit.
+        map_func: Custom mapping function. Defaults to None.
+
+    Attributes:
+        _expected_args: List of expected arguments for the custom mapping function.
+    """
+
     _expected_args = ['features']
 
     def __init__(
@@ -44,16 +59,36 @@ class FeatureMap:
             self,
             features: np.ndarray
     ) -> None:
+        """
+        Abstract method to set the custom mapping function.
+
+        Args:
+            features: Input features.
+        """
         pass
 
     def apply(
             self,
             features: np.ndarray
     ) -> None:
+        """
+        Applies the feature map to the given classical features.
+
+        Args:
+            features: Input features.
+        """
         self._map_func(features=features)
 
 
 class AngleEmbedding(FeatureMap):
+    """
+    Quantum feature map using the AngleEmbedding scheme.
+
+    Args:
+        n_qubits: Number of qubits in the quantum circuit.
+        rotation: Rotation gate type. Defaults to 'X'.
+    """
+
     def __init__(
             self,
             n_qubits: int,
@@ -66,6 +101,12 @@ class AngleEmbedding(FeatureMap):
             self,
             features: np.ndarray
     ) -> None:
+        """
+        Sets the mapping function for AngleEmbedding.
+
+        Args:
+            features: Input features.
+        """
         def map_func():
             qml.AngleEmbedding(
                 features=features,
@@ -90,6 +131,12 @@ class AmplitudeEmbedding(FeatureMap):
             self,
             features: np.ndarray
     ) -> None:
+        """
+        Sets the mapping function for AmplitudeEmbedding.
+
+        Args:
+            features: Input features.
+        """
         def map_func():
             qml.AmplitudeEmbedding(
                 features=features,
@@ -111,6 +158,12 @@ class IQPEmbedding(FeatureMap):
             self,
             features: np.ndarray
     ) -> None:
+        """
+        Sets the mapping function for IQPEmbedding.
+
+        Args:
+            features: Input features.
+        """
         def map_func():
             qml.IQPEmbedding(
                 features=features,
@@ -130,6 +183,15 @@ class ZZFeatureMap(FeatureMap):
             self,
             features: np.ndarray
     ) -> None:
+        """
+        Verifies the dimensions of the input features.
+
+        Args:
+            features: Input features.
+
+        Raises:
+            ValueError: If the dimensions are not valid.
+        """
         if features.shape[-1] > self._n_qubits:
             raise ValueError(
                 f"Features must be of length {self._n_qubits} or "
@@ -140,6 +202,12 @@ class ZZFeatureMap(FeatureMap):
             self,
             features: np.ndarray
     ) -> None:
+        """
+        Sets the mapping function for ZZFeatureMap.
+
+        Args:
+            features: Input features.
+        """
         def map_func():
             self._verify_data_dims(features)
 

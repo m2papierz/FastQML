@@ -8,6 +8,10 @@
 #
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
+"""
+Module providing variational forms.
+"""
+
 from abc import abstractmethod
 from typing import Any, Union, Callable
 
@@ -19,6 +23,17 @@ from fast_qml.quantum_circuits.entanglement import EntanglementGenerator
 
 
 class VariationalForm:
+    """
+    Abstract base class for quantum variational forms.
+
+    Args:
+        n_qubits: Number of qubits in the quantum circuit.
+        controlled_gate: Controlled gate type.
+        reps: Number of repetitions.
+
+    Attributes:
+        ROT_GATE_MAP : Mapping of rotation gate types to PennyLane operations.
+    """
 
     ROT_GATE_MAP = {
         'RX': qml.RX, 'RY': qml.RY, 'RZ': qml.RZ
@@ -27,7 +42,7 @@ class VariationalForm:
     def __init__(
             self,
             n_qubits: int,
-            controlled_gate: str = None,
+            controlled_gate: str,
             reps: int = 1
     ):
         self._n_qubits = n_qubits
@@ -38,6 +53,12 @@ class VariationalForm:
             self,
             c_gate: str
     ) -> Any:
+        """
+        Validates the rotation gate type.
+
+        Args:
+            c_gate: Rotation gate type.
+        """
         if c_gate not in self.ROT_GATE_MAP:
             raise ValueError(
                 f"Invalid rotation gate type. "
@@ -47,10 +68,22 @@ class VariationalForm:
 
     @property
     def params_num(self):
+        """
+       Property to get the total number of parameters.
+
+       Returns:
+           Total number of parameters.
+       """
         return self._get_params_num()
 
     @abstractmethod
     def _get_params_num(self) -> int:
+        """
+        Abstract method to get the total number of parameters.
+
+        Returns:
+            Total number of parameters.
+        """
         pass
 
     @abstractmethod
@@ -58,6 +91,12 @@ class VariationalForm:
             self,
             params: np.ndarray
     ) -> None:
+        """
+       Abstract method for the variational form function.
+
+       Args:
+           params: Variational parameters.
+        """
         pass
 
     @abstractmethod
@@ -65,17 +104,37 @@ class VariationalForm:
             self,
             params: np.ndarray
     ) -> None:
+        """
+        Abstract method to apply the variational form to the quantum circuit.
+
+        Args:
+            params: Variational parameters.
+        """
         pass
 
 
 class Ansatz(VariationalForm):
+    """
+   Quantum variational ansatz based on a user-defined variational function. Given variational
+   function needs to include entanglement operations.
+
+   Args:
+       n_qubits: Number of qubits in the quantum circuit.
+       parameters_num: Number of parameters in the variational function.
+       variational_func: User-defined variational function.
+       reps: Number of repetitions. Defaults to 1.
+
+   Attributes:
+       _expected_args: List of expected arguments for the variational function.
+   """
+
     _expected_args = ['params']
 
     def __init__(
             self,
             n_qubits: int,
             parameters_num: int,
-            variational_func: Callable = None,
+            variational_func: Callable,
             reps: int = 1
     ):
 
@@ -96,18 +155,36 @@ class Ansatz(VariationalForm):
         self._variational_function = variational_func
 
     def _get_params_num(self) -> int:
+        """
+        Returns the total number of parameters.
+
+        Returns:
+            Total number of parameters.
+        """
         return self._reps * self._parameters_num
 
     def _variational_func(
             self,
             params: np.ndarray
     ) -> None:
+        """
+        Calls the user-defined variational function.
+
+        Args:
+            params: Variational parameters.
+        """
         return self._variational_function(params)
 
     def apply(
             self,
             params: np.ndarray
     ) -> None:
+        """
+        Applies the variational form to the quantum circuit.
+
+        Args:
+            params: Variational parameters.
+        """
         if len(params) != self.params_num:
             ValueError(
                 f"Invalid parameters shape. "
@@ -121,6 +198,18 @@ class Ansatz(VariationalForm):
 
 
 class TwoLocal(VariationalForm):
+    """
+    The two-local circuit is a parameterized circuit consisting of alternating rotation layers
+    and entanglement layers. The rotation layers are single qubit gates applied on all qubits.
+    The entanglement layer uses two-qubit gates to entangle the qubits.
+
+    Args:
+        n_qubits: Number of qubits in the quantum circuit.
+        rotation_blocks: List of rotation gate types.
+        controlled_gate: Controlled gate type. Defaults to 'CX'.
+        entanglement: Entanglement pattern. Defaults to 'linear'.
+        reps: Number of repetitions. Defaults to 1.
+    """
     def __init__(
             self,
             n_qubits: int,
@@ -147,6 +236,12 @@ class TwoLocal(VariationalForm):
         ]
 
     def _get_params_num(self) -> int:
+        """
+        Returns the total number of parameters.
+
+        Returns:
+            Total number of parameters.
+        """
         rot_block_n = len(self._rotation_blocks)
         return self._reps * self._n_qubits * rot_block_n
 
@@ -154,6 +249,12 @@ class TwoLocal(VariationalForm):
             self,
             params: np.ndarray
     ) -> None:
+        """
+        Defines the variational form.
+
+        Args:
+            params: Variational parameters.
+        """
         for j, rot_ in enumerate(self._rotation_blocks):
             for q in range(self._n_qubits):
                 rot_(params[j * self._n_qubits + q], wires=[q])
@@ -163,6 +264,12 @@ class TwoLocal(VariationalForm):
             self,
             params: np.ndarray
     ) -> None:
+        """
+        Applies the variational form to the quantum circuit.
+
+        Args:
+            params: Variational parameters.
+        """
         if len(params) != self.params_num:
             ValueError(
                 f"Invalid parameters shape. "
@@ -176,11 +283,23 @@ class TwoLocal(VariationalForm):
 
 
 class EfficientSU2(TwoLocal):
+    """
+    The EfficientSU2 circuit consists of layers of single qubit operations spanned by SU(2) and
+    CX entanglements. This is a heuristic pattern that can be used to prepare trial wave functions
+    for variational quantum algorithms or classification circuit for machine learning. SU(2) stands
+    for special unitary group of degree 2, its elements are 2×2 unitary matrices with determinant 1,
+    such as the Pauli rotation gates.
+
+    Args:
+        n_qubits: Number of qubits in the quantum circuit.
+        rotation_blocks: List of rotation gate types.
+        entanglement: Entanglement pattern. Defaults to 'linear'.
+        reps: Number of repetitions. Defaults to 1.
+    """
     def __init__(
             self,
             n_qubits: int,
             rotation_blocks: list[str] = None,
-            controlled_gate: str = 'CX',
             entanglement: str = 'linear',
             reps: int = 1
     ):
@@ -194,13 +313,21 @@ class EfficientSU2(TwoLocal):
         super().__init__(
             n_qubits=n_qubits,
             rotation_blocks=rotation_blocks,
-            controlled_gate=controlled_gate,
+            controlled_gate='CX',
             entanglement=entanglement,
             reps=reps
         )
 
 
 class TreeTensor(VariationalForm):
+    """
+    Quantum variational form using the TreeTensor ansatz. Fits best in models designed for
+    binary classification.
+
+    Args:
+        n_qubits: Number of qubits in the quantum circuit.
+        controlled_gate: Controlled gate type. Defaults to 'CX'.
+    """
     def __init__(
             self,
             n_qubits: int,
@@ -221,12 +348,24 @@ class TreeTensor(VariationalForm):
         )
 
     def _get_params_num(self) -> int:
+        """
+        Returns the total number of parameters.
+
+        Returns:
+            Total number of parameters.
+        """
         return 2 * self._n_qubits - 1
 
     def _variational_func(
             self,
             params: np.ndarray
     ) -> None:
+        """
+        Defines the variational form.
+
+        Args:
+            params: Variational parameters.
+        """
         for i in range(self._n_qubits):
             qml.RY(params[i], wires=[i])
 
@@ -241,6 +380,12 @@ class TreeTensor(VariationalForm):
             self,
             params: np.ndarray
     ) -> None:
+        """
+        Applies the variational form to the quantum circuit.
+
+        Args:
+            params: Variational parameters.
+        """
         if len(params) != self.params_num:
             ValueError(
                 f"Invalid parameters shape. "
