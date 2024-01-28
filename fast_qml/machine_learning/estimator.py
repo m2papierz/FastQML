@@ -27,14 +27,14 @@ class QuantumEstimator:
             n_qubits: int,
             feature_map: FeatureMap,
             ansatz: VariationalForm,
-            measurement_op: qml.operation.Operation,
+            measurement_op: Callable,
             loss_fn: Callable
     ):
         self._n_qubits = n_qubits
         self._feature_map = feature_map
         self._ansatz = ansatz
-        self._measurement_op = measurement_op
         self._loss_fn = loss_fn
+        self._measurement_op = measurement_op
 
         if fast_qml.DEVICE == QubitDevice.CPU.value:
             self._interface = 'auto'
@@ -54,10 +54,9 @@ class QuantumEstimator:
 
         self._weights = self._initialize_weights()
 
+    @abstractmethod
     def _initialize_weights(self) -> np.ndarray:
-        weights = 0.1 * qml.numpy.random.random(
-            self._ansatz.params_num, requires_grad=True)
-        return weights
+        pass
 
     @abstractmethod
     def _quantum_layer(
