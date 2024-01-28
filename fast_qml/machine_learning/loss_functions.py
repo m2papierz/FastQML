@@ -32,7 +32,6 @@ class LossFunction:
                 NotImplementedError()
 
             def wrapper(*args, **kwargs):
-                # Replace numpy with the specified library
                 original_numpy = globals()['np']
                 globals()['np'] = np_module
 
@@ -41,7 +40,6 @@ class LossFunction:
                 except Exception as e:
                     globals()['np'] = original_numpy
                     result = func(*args, **kwargs)
-
                     print(f"Cannot wrap given function with {np_module}:", e)
                 finally:
                     # Restore the original numpy after the function call
@@ -81,7 +79,41 @@ class MSELoss(LossFunction):
             y_real: np.ndarray,
             y_pred: np.ndarray
     ) -> float:
-        return np.sum((y_real - y_pred) ** 2) / len(y_real)
+        loss = np.sum((y_real - y_pred) ** 2) / len(y_real)
+        return loss
+
+
+class HuberLoss(LossFunction):
+    def __init__(self, delta: float = 1.0):
+        super().__init__()
+        self.delta = delta
+
+    def _loss_fn(
+            self,
+            y_real: np.ndarray,
+            y_pred: np.ndarray
+    ) -> float:
+        error = y_real - y_pred
+        huber_loss = np.where(
+            np.abs(error) < self.delta, 0.5 * error ** 2,
+            self.delta * (np.abs(error) - 0.5 * self.delta)
+        )
+        loss = np.mean(huber_loss)
+        return loss
+
+
+class LogCoshLoss(LossFunction):
+    def __init__(self):
+        super().__init__()
+
+    def _loss_fn(
+            self,
+            y_real: np.ndarray,
+            y_pred: np.ndarray
+    ) -> float:
+        log_cosh_loss = np.log(np.cosh(y_real - y_pred))
+        loss = np.mean(log_cosh_loss)
+        return loss
 
 
 class BinaryCrossEntropyLoss(LossFunction):
