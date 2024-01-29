@@ -17,6 +17,22 @@ from fast_qml import QubitDevice
 
 
 class LossFunction:
+    """
+    A base class for implementing loss functions. It provides a framework for defining loss functions
+    compatible with different numpy modules based on the quantum device being used. It automatically
+    selects the appropriate numpy module depending on the device configuration.
+
+    Attributes:
+        _np_module: The numpy module appropriate for the current quantum device.
+                    This module is used for all numerical operations within the loss function.
+
+    Raises:
+        NotImplementedError: If the class is instantiated with an unsupported quantum device configuration.
+
+    Note:
+        To use this class, one should subclass it and implement the `_loss_fn` method with the specific
+        loss function logic. The subclass can then be instantiated and used directly.
+    """
     def __init__(self):
         self._np_module = self._get_numpy_module()
 
