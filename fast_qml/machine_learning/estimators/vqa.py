@@ -21,20 +21,25 @@ from fast_qml.machine_learning.loss_functions import (
 
 
 class VariationalQuantumEstimator(QuantumEstimator):
+    """
+    A quantum estimator using a variational approach.
+    """
     def __init__(
             self,
             n_qubits: int,
             feature_map: FeatureMap,
             ansatz: VariationalForm,
             measurement_op: Callable,
-            loss_fn: Callable
+            loss_fn: Callable,
+            measurements_num: int
     ):
         super().__init__(
             n_qubits=n_qubits,
             feature_map=feature_map,
             ansatz=ansatz,
             loss_fn=loss_fn,
-            measurement_op=measurement_op
+            measurement_op=measurement_op,
+            measurements_num=measurements_num
         )
 
     def _initialize_weights(self) -> np.ndarray:
@@ -59,7 +64,10 @@ class VariationalQuantumEstimator(QuantumEstimator):
         def _circuit():
             self._quantum_layer(
                 weights=weights, x_data=x_data)
-            return qml.expval(self._measurement_op(0))
+            return [
+                qml.expval(self._measurement_op(i))
+                for i in range(self._measurements_num)
+            ]
         return _circuit()
 
     def fit(
@@ -68,26 +76,29 @@ class VariationalQuantumEstimator(QuantumEstimator):
             y_data: np.ndarray,
             learning_rate: float,
             num_epochs: int,
-            verbose: bool
+            verbose: bool,
+            batch_size: int = None
     ):
         optimizer = self._optimizer(
             params=self._weights,
             q_node=self._q_model,
             loss_fn=self._loss_fn,
+            batch_size=batch_size,
+            epochs_num=num_epochs,
             learning_rate=learning_rate
         )
 
-        self._weights = optimizer.optimize(
-            data=x_data,
-            targets=y_data,
-            epochs=num_epochs,
-            verbose=verbose
+        optimizer.optimize(
+            data=x_data, targets=y_data, verbose=verbose
         )
 
-        return self._weights
+        return optimizer.weights
 
 
 class VQRegressor(VariationalQuantumEstimator):
+    """
+    A variational quantum estimator for regression tasks.
+    """
 
     _allowed_losses = [MSELoss, HuberLoss, LogCoshLoss]
 
@@ -97,29 +108,25 @@ class VQRegressor(VariationalQuantumEstimator):
             feature_map: FeatureMap,
             ansatz: VariationalForm,
             loss_fn: Callable,
-            outputs_num: int,
             measurement_op: Callable = qml.PauliZ
     ):
-        if not np.any([isinstance(loss_fn, loss) for loss in self._allowed_losses]):
-            raise AttributeError()
-
-        self._outputs_num = outputs_num
+        if not any(isinstance(loss_fn, loss) for loss in self._allowed_losses):
+            raise AttributeError("Invalid loss function.")
 
         super().__init__(
             n_qubits=n_qubits,
             feature_map=feature_map,
             ansatz=ansatz,
             loss_fn=loss_fn,
-            measurement_op=measurement_op
+            measurement_op=measurement_op,
+            measurements_num=1
         )
-
-    def _set_measurement_op(
-            self
-    ) -> qml.operation.Operator:
-        return qml.PauliZ(wires=range(self._outputs_num))
 
 
 class VQClassifier(VariationalQuantumEstimator):
+    """
+    A variational quantum estimator for classification tasks.
+    """
     def __init__(
             self,
             n_qubits: int,
@@ -132,25 +139,18 @@ class VQClassifier(VariationalQuantumEstimator):
 
         if classes_num == 2:
             loss_fn = BinaryCrossEntropyLoss()
+            measurements_num = 1
         elif classes_num > 2:
             loss_fn = CrossEntropyLoss()
+            measurements_num = classes_num
         else:
-            raise ValueError(
-                "Number of classes cannot be smaller than 2."
-            )
+            raise ValueError("Classes must be 2 or more.")
 
         super().__init__(
             n_qubits=n_qubits,
             feature_map=feature_map,
             ansatz=ansatz,
             loss_fn=loss_fn,
-            measurement_op=measurement_op
+            measurement_op=measurement_op,
+            measurements_num=measurements_num
         )
-
-    def _set_measurement_op(
-            self
-    ) -> qml.operation.Operator:
-        if self._classes_num == 1:
-            return qml.PauliZ(wires=[0])
-        else:
-            return qml.PauliZ(wires=range(self._classes_num))
