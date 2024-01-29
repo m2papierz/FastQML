@@ -19,7 +19,7 @@ import numpy as np
 import pennylane as qml
 
 from fast_qml.utils import validate_function_args
-from fast_qml.quantum_circuits.entanglement import EntanglementGenerator
+from fast_qml.quantum_circuits.entanglement import Entangler
 
 
 class VariationalForm:
@@ -224,7 +224,7 @@ class TwoLocal(VariationalForm):
             reps=reps
         )
 
-        self._entanglement = EntanglementGenerator(
+        self._entanglement = Entangler(
             n_qubits=n_qubits,
             c_gate=controlled_gate,
             entanglement=entanglement
