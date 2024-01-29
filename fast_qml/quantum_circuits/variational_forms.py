@@ -142,7 +142,7 @@ class Ansatz(VariationalForm):
 
         super().__init__(
             n_qubits=n_qubits,
-            controlled_gate='CX',
+            controlled_gate='CNOT',
             reps=reps
         )
 
@@ -214,7 +214,7 @@ class TwoLocal(VariationalForm):
             self,
             n_qubits: int,
             rotation_blocks: list[str] = None,
-            controlled_gate: str = 'CX',
+            controlled_gate: str = 'CNOT',
             entanglement: Union[str, list[list[int]]] = 'linear',
             reps: int = 1
     ):
@@ -313,7 +313,7 @@ class EfficientSU2(TwoLocal):
         super().__init__(
             n_qubits=n_qubits,
             rotation_blocks=rotation_blocks,
-            controlled_gate='CX',
+            controlled_gate='CNOT',
             entanglement=entanglement,
             reps=reps
         )
@@ -331,7 +331,7 @@ class TreeTensor(VariationalForm):
     def __init__(
             self,
             n_qubits: int,
-            controlled_gate: str = 'CX'
+            controlled_gate: str = 'CNOT'
     ):
         if not (n_qubits & (n_qubits - 1)) == 0:
             raise ValueError(
