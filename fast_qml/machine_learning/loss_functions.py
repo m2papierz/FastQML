@@ -243,11 +243,15 @@ class CrossEntropyLoss(LossFunction):
         self._eps = eps
 
     def _one_hot_encode(self, y_real, k):
-        """ Creates a one-hot encoding of x of size k """
+        """
+        Creates a one-hot encoding of x of size k
+        """
         return self._np_module.array(y_real[:, None] == self._np_module.arange(k))
 
     def _is_one_hot(self, y_real):
-        """ Checks if y is one-hot encoded """
+        """
+        Checks if y is one-hot encoded
+        """
         return (
                 y_real.ndim == 2 and
                 self._np_module.all(self._np_module.sum(y_real, axis=1) == 1) and
