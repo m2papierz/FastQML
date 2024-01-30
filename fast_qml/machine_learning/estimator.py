@@ -93,7 +93,7 @@ class QuantumEstimator:
         """
         Initialize weights for the quantum circuit.
         """
-        pass
+        raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
     def _quantum_layer(
@@ -104,7 +104,7 @@ class QuantumEstimator:
         """
         Define and apply the quantum layer of the circuit.
         """
-        pass
+        raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
     def _q_model(
@@ -115,7 +115,7 @@ class QuantumEstimator:
         """
         Define and apply the quantum model for the variational estimator.
         """
-        pass
+        raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
     def fit(
@@ -130,4 +130,4 @@ class QuantumEstimator:
         """
         Fit the model to the given data.
         """
-        pass
+        raise NotImplementedError("Subclasses must implement this method.")
