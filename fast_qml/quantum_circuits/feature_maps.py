@@ -65,7 +65,7 @@ class FeatureMap:
         Args:
             features: Input features.
         """
-        pass
+        raise NotImplementedError("Subclasses must implement this method.")
 
     def apply(
             self,

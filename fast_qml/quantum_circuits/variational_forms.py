@@ -63,29 +63,37 @@ class VariationalForm:
 
     @property
     def params_num(self):
-        """ Returns the total number of parameters. """
+        """
+        Returns the total number of parameters.
+        """
         return self._get_params_num()
 
     @abstractmethod
     def _get_params_num(self) -> int:
-        """ Abstract method to get the total number of parameters. """
-        pass
+        """
+        Abstract method to get the total number of parameters.
+        """
+        raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
     def _variational_func(
             self,
             params: np.ndarray
     ) -> None:
-        """ Abstract method for the variational form function. """
-        pass
+        """
+        Abstract method for the variational form function.
+        """
+        raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
     def apply(
             self,
             params: np.ndarray
     ) -> None:
-        """ Abstract method to apply the variational form to the quantum circuit. """
-        pass
+        """
+        Abstract method to apply the variational form to the quantum circuit.
+        """
+        raise NotImplementedError("Subclasses must implement this method.")
 
 
 class Ansatz(VariationalForm):
@@ -124,21 +132,27 @@ class Ansatz(VariationalForm):
         self._variational_function = variational_func
 
     def _get_params_num(self) -> int:
-        """ Returns the total number of parameters. """
+        """
+        Returns the total number of parameters.
+        """
         return self._reps * self._parameters_num
 
     def _variational_func(
             self,
             params: np.ndarray
     ) -> None:
-        """ Calls the user-defined variational function. """
+        """
+        Calls the user-defined variational function.
+        """
         return self._variational_function(params)
 
     def apply(
             self,
             params: np.ndarray
     ) -> None:
-        """ Applies the variational form to the quantum circuit. """
+        """
+        Applies the variational form to the quantum circuit.
+        """
         if len(params) != self.params_num:
             ValueError(
                 f"Invalid parameters shape. "
@@ -190,7 +204,9 @@ class TwoLocal(VariationalForm):
         ]
 
     def _get_params_num(self) -> int:
-        """ Returns the total number of parameters. """
+        """
+        Returns the total number of parameters.
+        """
         rot_block_n = len(self._rotation_blocks)
         return self._reps * self._n_qubits * rot_block_n
 
@@ -198,7 +214,9 @@ class TwoLocal(VariationalForm):
             self,
             params: np.ndarray
     ) -> None:
-        """ Defines the variational form. """
+        """
+        Defines the variational form.
+        """
         for j, rot_ in enumerate(self._rotation_blocks):
             for q in range(self._n_qubits):
                 rot_(params[j * self._n_qubits + q], wires=[q])
@@ -208,7 +226,9 @@ class TwoLocal(VariationalForm):
             self,
             params: np.ndarray
     ) -> None:
-        """ Applies the variational form to the quantum circuit. """
+        """
+        Applies the variational form to the quantum circuit.
+        """
         if len(params) != self.params_num:
             ValueError(
                 f"Invalid parameters shape. "
@@ -288,14 +308,18 @@ class TreeTensor(VariationalForm):
         )
 
     def _get_params_num(self) -> int:
-        """ Returns the total number of parameters. """
+        """
+        Returns the total number of parameters.
+        """
         return 2 * self._n_qubits - 1
 
     def _variational_func(
             self,
             params: np.ndarray
     ) -> None:
-        """ Defines the variational form. """
+        """
+        Defines the variational form.
+        """
         for i in range(self._n_qubits):
             qml.RY(params[i], wires=[i])
 
@@ -314,7 +338,9 @@ class TreeTensor(VariationalForm):
             self,
             params: np.ndarray
     ) -> None:
-        """ Applies the variational form to the quantum circuit. """
+        """
+        Applies the variational form to the quantum circuit.
+        """
         if len(params) != self.params_num:
             ValueError(
                 f"Invalid parameters shape. "
