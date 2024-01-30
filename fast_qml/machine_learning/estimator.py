@@ -19,6 +19,7 @@ from fast_qml import QubitDevice
 from fast_qml.quantum_circuits.feature_maps import FeatureMap
 from fast_qml.quantum_circuits.variational_forms import VariationalForm
 from fast_qml.machine_learning.optimizer import DefaultOptimizer, JITOptimizer
+from fast_qml.machine_learning.loss_functions import MSELoss
 
 
 class QuantumEstimator:
@@ -28,13 +29,15 @@ class QuantumEstimator:
     This class provides a framework for quantum machine learning models,
     and is intended to be subclassed for specific implementations.
 
+    Args:
+        n_qubits: Number of qubits in the quantum circuit.
+        feature_map: The feature map for encoding classical data into quantum states.
+        ansatz: The variational form (ansatz) for the quantum circuit.
+        measurement_op: The measurement operator or observable used in the circuit.
+        loss_fn: The loss function used for optimization.
+        measurements_num: Number of wires on which to run measurements.
+
     Attributes:
-        _n_qubits: Number of qubits in the quantum circuit.
-        _feature_map: The feature map for encoding classical data into quantum states.
-        _ansatz: The variational form (ansatz) for the quantum circuit.
-        _measurement_op: The measurement operator or observable used in the circuit.
-        _loss_fn: The loss function used for optimization.
-        _measurements_num: Number of measurements for estimating expectation values.
         _interface: The computational interface (e.g., 'auto', 'jax') used by the quantum device.
         _optimizer: The optimizer used for training the quantum circuit.
         _device: The quantum device on which the circuit will be executed.
@@ -44,10 +47,14 @@ class QuantumEstimator:
             n_qubits: int,
             feature_map: FeatureMap,
             ansatz: VariationalForm,
-            measurement_op: Callable,
-            loss_fn: Callable,
-            measurements_num: int
+            measurement_op: Callable = qml.PauliZ,
+            loss_fn: Callable = MSELoss(),
+            measurements_num: int = 1
     ):
+        # Validate measurement operation
+        if not self._is_valid_measurement_op(measurement_op):
+            raise ValueError("Invalid measurement operation provided.")
+
         self._n_qubits = n_qubits
         self._feature_map = feature_map
         self._ansatz = ansatz
@@ -59,7 +66,9 @@ class QuantumEstimator:
         self._weights = self._initialize_weights()
 
     def _setup_device_and_optimizer(self):
-        """ Set up the quantum device and optimizer based on the current device configuration. """
+        """
+        Set up the quantum device and optimizer based on the current device configuration.
+        """
         if fast_qml.DEVICE == QubitDevice.CPU.value:
             self._interface = 'auto'
             self._optimizer = DefaultOptimizer
@@ -72,9 +81,18 @@ class QuantumEstimator:
         else:
             raise NotImplementedError("The specified device is not supported.")
 
+    @staticmethod
+    def _is_valid_measurement_op(measurement_op):
+        """
+        Check if the provided measurement operation is valid.
+        """
+        return isinstance(measurement_op(0), qml.operation.Operation)
+
     @abstractmethod
     def _initialize_weights(self) -> np.ndarray:
-        """ Initialize weights for the quantum circuit. """
+        """
+        Initialize weights for the quantum circuit.
+        """
         pass
 
     @abstractmethod
@@ -82,8 +100,10 @@ class QuantumEstimator:
             self,
             weights: np.ndarray,
             x_data: np.ndarray
-    ):
-        """ Define and apply the quantum layer of the circuit. """
+    ) -> None:
+        """
+        Define and apply the quantum layer of the circuit.
+        """
         pass
 
     @abstractmethod
@@ -91,8 +111,10 @@ class QuantumEstimator:
             self,
             weights: np.ndarray,
             x_data: np.ndarray
-    ):
-        """ Define and apply the quantum model for the variational estimator. """
+    ) -> qml.qnode:
+        """
+        Define and apply the quantum model for the variational estimator.
+        """
         pass
 
     @abstractmethod
@@ -104,6 +126,8 @@ class QuantumEstimator:
             num_epochs: int,
             batch_size: int,
             verbose: bool
-    ):
-        """ Fit the model to the given data. """
+    ) -> np.ndarray:
+        """
+        Fit the model to the given data.
+        """
         pass
