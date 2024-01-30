@@ -201,7 +201,7 @@ class LogCoshLoss(LossFunction):
         Returns:
             The computed Log-Cosh loss.
         """
-        log_cosh_loss = self._np_module.log(np.cosh(y_real - y_pred))
+        log_cosh_loss = self._np_module.log(self._np_module.cosh(y_real - y_pred))
         loss = self._np_module.mean(log_cosh_loss)
         return loss
 
