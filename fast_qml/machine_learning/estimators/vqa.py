@@ -18,7 +18,8 @@ leveraging quantum feature maps and variational forms. They are capable of handl
 of loss functions suitable for various machine learning tasks.
 """
 
-from typing import Callable
+import warnings
+from typing import Callable, Union, Tuple
 import numpy as np
 import pennylane as qml
 
@@ -126,7 +127,7 @@ class VariationalQuantumEstimator(QuantumEstimator):
             num_epochs: int,
             batch_size: int = None,
             verbose: bool = True
-    ) -> np.ndarray:
+    ) -> None:
         """
         Trains the variational quantum estimator on the provided dataset.
 
@@ -140,9 +141,6 @@ class VariationalQuantumEstimator(QuantumEstimator):
             num_epochs: Number of epochs to run the training.
             batch_size: Size of batches for training. If None, the whole dataset is used in each iteration.
             verbose : If True, prints verbose messages during training.
-
-        Returns:
-            The optimized weights after training.
         """
         optimizer = self._optimizer(
             params=self._weights,
@@ -157,7 +155,7 @@ class VariationalQuantumEstimator(QuantumEstimator):
             data=x_data, targets=y_data, verbose=verbose
         )
 
-        return optimizer.weights
+        self._weights = optimizer.weights
 
 
 class VQRegressor(VariationalQuantumEstimator):
@@ -190,6 +188,20 @@ class VQRegressor(VariationalQuantumEstimator):
             measurements_num=1
         )
 
+    def predict(
+            self,
+            x: np.ndarray
+    ) -> np.ndarray:
+        """
+        Returns the predictions (model outputs) for the given input data.
+
+        Args:
+            x: An array of input data.
+        """
+        return np.array(
+            [self._q_model(weights=self._weights, x_data=_x) for _x in x]
+        ).ravel()
+
 
 class VQClassifier(VariationalQuantumEstimator):
     """
@@ -203,22 +215,22 @@ class VQClassifier(VariationalQuantumEstimator):
         classes_num: Number of classes in the classification problem.
     """
 
+    _allowed_losses = [MSELoss, HuberLoss, LogCoshLoss, BinaryCrossEntropyLoss]
+
     def __init__(
             self,
             n_qubits: int,
             feature_map: FeatureMap,
             ansatz: VariationalForm,
             classes_num: int,
+            loss_fn: Callable = None,
             measurement_op: Callable = qml.PauliZ
     ):
-        if classes_num == 2:
-            loss_fn = BinaryCrossEntropyLoss()
-            measurements_num = 1
-        elif classes_num > 2:
-            loss_fn = CrossEntropyLoss()
-            measurements_num = classes_num
-        else:
-            raise ValueError("Classes must be 2 or more.")
+        self._validate_loss_fn(loss_fn)
+        self._classes_num = classes_num
+
+        loss_fn, measurements_num = self._set_loss_function(
+            classes_num=classes_num, loss_fn=loss_fn)
 
         super().__init__(
             n_qubits=n_qubits,
@@ -228,3 +240,82 @@ class VQClassifier(VariationalQuantumEstimator):
             measurement_op=measurement_op,
             measurements_num=measurements_num
         )
+
+    def _validate_loss_fn(
+            self,
+            loss_fn: Callable
+    ) -> None:
+        """
+        Validates the provided loss function.
+        """
+        if loss_fn is not None and not any(isinstance(loss_fn, loss) for loss in self._allowed_losses):
+            raise AttributeError("Invalid loss function.")
+
+    @staticmethod
+    def _set_loss_function(
+            classes_num,
+            loss_fn
+    ) -> Union[Tuple[Callable, int]]:
+        """
+        Selects the appropriate loss function based on the number of classes.
+        """
+        if classes_num == 2:
+            return BinaryCrossEntropyLoss(), 1
+        elif classes_num > 2:
+            if loss_fn is not None:
+                warnings.warn(
+                    "For multi-class classification (classes_num > 2), the provided "
+                    "loss_fn will be ignored, and CrossEntropyLoss will be used instead.",
+                    category=UserWarning
+                )
+            return CrossEntropyLoss(), classes_num
+        else:
+            raise ValueError("Classes must be 2 or more.")
+
+    def predict_proba(
+            self,
+            x: np.ndarray
+    ) -> np.ndarray:
+        """
+        Predict the probability of each class for the given input data.nThe output probabilities
+        indicate the likelihood of each class for each sample.
+
+        Args:
+            x: An array of input data.
+
+        Returns:
+            An array of predicted probabilities. For binary classification, this will be a 1D array with
+            a single probability for each sample. For multi-class classification, this will be a 2D array
+            where each row corresponds to a sample and each column corresponds to a class.
+        """
+        return np.array(
+            [self._q_model(weights=self._weights, x_data=_x) for _x in x]
+        ).ravel()
+
+    def predict(
+            self,
+            x: np.ndarray,
+            threshold: float = 0.5
+    ) -> np.ndarray:
+        """
+        Predict class labels for the given input data.
+
+        For binary classification, the function applies a threshold to the output probabilities to
+        determine the class labels. For multi-class classification, the function assigns each sample
+         to the class with the highest probability.
+
+        Args:
+            x: An array of input data
+            threshold: The threshold for converting probabilities to binary class labels. Defaults to 0.5.
+
+        Returns:
+            An array of predicted class labels. For binary classification, this will be a 1D array with
+            binary labels (0 or 1). For multi-class classification, this will be a 1D array where each
+            element is the predicted class index.
+        """
+        predictions = self.predict_proba(x)
+
+        if self._classes_num == 2:
+            return np.where(predictions >= threshold, 1, 0)
+        else:
+            return np.argmax(predictions, axis=1)
