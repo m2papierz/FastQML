@@ -93,7 +93,7 @@ class Optimizer:
         """ Property to get the current model parameters. """
         return self._params
 
-    def batch_generator(
+    def _batch_generator(
             self,
             data: np.ndarray,
             targets: np.ndarray
@@ -132,8 +132,34 @@ class Optimizer:
             self._q_node(weights=weights, x_data=x_data))
         return self._loss_fun(y_real=y_data, y_pred=predictions)
 
+    @staticmethod
+    def _validate_data(
+            x_data: np.ndarray,
+            y_data: np.ndarray,
+            data_type: str
+    ) -> None:
+        """
+        Validates that the input and target data have the same number of samples.
+
+        Args:
+            x_data: Input data.
+            y_data: Target data.
+            data_type: A string indicating the type of data (Training or Validation).
+        """
+        if x_data.shape[0] != y_data.shape[0]:
+            raise ValueError(
+                f"{data_type} data and targets must have the same number of samples"
+            )
+
     @abstractmethod
-    def optimize(self, data, targets, verbose):
+    def optimize(
+            self,
+            x_train: np.ndarray,
+            y_train: np.ndarray,
+            x_val: np.ndarray,
+            y_val: np.ndarray,
+            verbose: bool
+    ) -> None:
         """
         Abstract method for the optimization loop.
 
@@ -141,9 +167,11 @@ class Optimizer:
         optimization algorithm.
 
         Args:
-            data: Input data for the model.
-            targets: Target data for training.
-            verbose: Flag for verbose output during training.
+            x_train: Training input data for the model.
+            y_train: Training target data.
+            x_val: Validation input data.
+            y_val: Validation target data.
+            verbose: Flag to control verbosity.
         """
         pass
 
@@ -182,40 +210,91 @@ class DefaultOptimizer(Optimizer):
         )
         self._opt = qml.AdamOptimizer(self._learning_rate)
 
-    def optimize(self, data, targets, verbose):
+    def _perform_training_epoch(
+            self,
+            x_train: np.ndarray,
+            y_train: np.ndarray
+    ) -> float:
         """
-        Optimization loop.
+        Performs a single training epoch.
 
         Args:
-            data: Input data for the model.
-            targets: Target data for training.
-            verbose: Flag to control verbosity.
+            x_train: Training input data.
+            y_train: Training target data.
+
+        Returns:
+            Average training loss for the epoch.
         """
 
-        if data.shape[0] != targets.shape[0]:
-            raise ValueError(
-                "Data and targets must have the same number of samples"
-            )
+        if self._batch_size:
+            total_loss, num_batches = 0.0, 0
+            for batch_data, batch_targets in self._batch_generator(x_train, y_train):
+                self._params = self._opt.step(
+                    self._calculate_loss, self._params, x_data=batch_data, y_data=batch_targets)
+                batch_loss = self._calculate_loss(self._params, batch_data, batch_targets)
+                total_loss += batch_loss
+                num_batches += 1
+            average_loss = total_loss / num_batches if num_batches > 0 else 0
+        else:
+            self._params = self._opt.step(
+                self._calculate_loss, self._params, x_data=x_train, y_data=y_train)
+            average_loss = self._calculate_loss(self._params, x_train, y_train)
+
+        return average_loss
+
+    def _perform_validation_epoch(self, x_val: np.ndarray, y_val: np.ndarray) -> float:
+        """
+        Performs a validation step.
+
+        Args:
+            x_val: Validation input data.
+            y_val: Validation target data.
+
+        Returns:
+            Average validation loss.
+        """
+        if self._batch_size:
+            total_loss, num_batches = 0.0, 0
+            for batch_data, batch_targets in self._batch_generator(x_val, y_val):
+                batch_loss = self._calculate_loss(self._params, batch_data, batch_targets)
+                total_loss += batch_loss
+                num_batches += 1
+            average_loss = total_loss / num_batches if num_batches > 0 else 0
+        else:
+            average_loss = self._calculate_loss(self._params, x_val, y_val)
+        return average_loss
+
+    def optimize(
+            self,
+            x_train: np.ndarray,
+            y_train: np.ndarray,
+            x_val: np.ndarray = None,
+            y_val: np.ndarray = None,
+            verbose: bool = True
+    ) -> None:
+        """
+        Optimization loop with validation.
+
+        Args:
+            x_train: Training input data for the model.
+            y_train: Training target data.
+            x_val: Optional validation input data.
+            y_val: Optional validation target data.
+            verbose: Flag to control verbosity.
+        """
+        self._validate_data(x_train, y_train, data_type='Training')
+        if x_val is not None and y_val is not None:
+            self._validate_data(x_val, y_val, data_type='Validation')
 
         for epoch in range(self._epochs_num):
-            if self._batch_size:
-                total_loss, num_batches = 0, 0
-                for batch_data, batch_targets in self.batch_generator(data, targets):
-                    self._params = self._opt.step(
-                        self._calculate_loss, self._params, x_data=batch_data, y_data=batch_targets)
-                    loss_val = self._calculate_loss(self._params, data, targets)
-                    total_loss += loss_val
-                    num_batches += 1
-                train_loss = total_loss / num_batches
-            else:
-                self._params = self._opt.step(
-                    self._calculate_loss, self._params, x_data=data, y_data=targets)
-                train_loss = self._calculate_loss(self._params, data, targets)
+            training_loss = self._perform_training_epoch(x_train=x_train, y_train=y_train)
 
             if verbose:
-                print(f"Epoch {epoch + 1}/{self._epochs_num} - Training Loss: {train_loss:.5f}")
-
-        return self._params
+                message = f"Epoch {epoch + 1}/{self._epochs_num} - train_loss: {training_loss:.5f}"
+                if x_val is not None and y_val is not None:
+                    validation_loss = self._perform_validation_epoch(x_val=x_val, y_val=y_val)
+                    message += f", val_loss: {validation_loss:.5f}"
+                print(message)
 
 
 class JITOptimizer(Optimizer):
@@ -337,39 +416,111 @@ class JITOptimizer(Optimizer):
         params = optax.apply_updates(params, updates)
         return params, opt_state, loss_val
 
-    def optimize(
+    @jax.jit
+    def _validation_step(
             self,
+            params: np.ndarray,
             data: np.ndarray,
-            targets: np.ndarray,
-            verbose: bool
-    ) -> None:
+            targets: np.ndarray
+    ) -> np.ndarray:
         """
-        Optimization loop.
+        Perform a validation step.
 
         Args:
-            data: Input data for the model.
-            targets: Target data for training.
+            params: Model parameters.
+            data: Input data.
+            targets: Target data.
+
+        Returns:
+            Loss value for the given data and targets.
+        """
+        return self._calculate_loss(params, data, targets)
+
+    def _perform_training_epoch(
+            self,
+            x_train: np.ndarray,
+            y_train: np.ndarray,
+            optimizer_state: OptimizerState
+    ) -> Tuple[float, OptimizerState]:
+        """
+        Performs a single training epoch.
+
+        Args:
+            x_train: Training input data.
+            y_train: Training target data.
+            optimizer_state: Current state of the optimizer.
+
+        Returns:
+            Average training loss for the epoch.
+        """
+
+        if self._batch_size:
+            total_loss, num_batches = 0.0, 0
+            for batch_data, batch_targets in self._batch_generator(x_train, y_train):
+                self._params, optimizer_state, batch_loss = self._update_step(
+                    self._params, optimizer_state, batch_data, batch_targets)
+                total_loss += batch_loss
+                num_batches += 1
+            average_loss = total_loss / num_batches if num_batches > 0 else 0
+        else:
+            self._params, optimizer_state, average_loss = self._update_step(
+                self._params, optimizer_state, x_train, y_train)
+
+        return average_loss, optimizer_state
+
+    def _perform_validation_epoch(self, x_val: np.ndarray, y_val: np.ndarray) -> float:
+        """
+        Performs a validation step.
+
+        Args:
+            x_val: Validation input data.
+            y_val: Validation target data.
+
+        Returns:
+            Average validation loss.
+        """
+        if self._batch_size:
+            total_loss, num_batches = 0.0, 0
+            for batch_data, batch_targets in self._batch_generator(x_val, y_val):
+                batch_loss = self._validation_step(self._parameters, batch_data, batch_targets)
+                total_loss += batch_loss
+                num_batches += 1
+            average_loss = total_loss / num_batches if num_batches > 0 else 0
+        else:
+            average_loss = self._validation_step(self._params, x_val, y_val)
+        return average_loss
+
+    def optimize(
+            self,
+            x_train: np.ndarray,
+            y_train: np.ndarray,
+            x_val: np.ndarray = None,
+            y_val: np.ndarray = None,
+            verbose: bool = True
+    ) -> None:
+        """
+        Optimization loop with validation.
+
+        Args:
+            x_train: Training input data for the model.
+            y_train: Training target data.
+            x_val: Optional validation input data.
+            y_val: Optional validation target data.
             verbose: Flag to control verbosity.
         """
-        if data.shape[0] != targets.shape[0]:
-            raise ValueError(
-                "Data and targets must have the same number of samples"
-            )
+        self._validate_data(x_train, y_train, data_type='Training')
+        if x_val is not None and y_val is not None:
+            self._validate_data(x_val, y_val, data_type='Validation')
 
         opt_state = self._opt.init(self._params)
 
         for epoch in range(self._epochs_num):
-            if self._batch_size:
-                total_loss, num_batches = 0, 0
-                for batch_data, batch_targets in self.batch_generator(data, targets):
-                    self._params, opt_state, loss_val = self._update_step(
-                        self._params, opt_state, batch_data, batch_targets)
-                    total_loss += loss_val
-                    num_batches += 1
-                train_loss = total_loss / num_batches
-            else:
-                self._params, opt_state, train_loss = self._update_step(
-                    self._params, opt_state, data, targets)
+            training_loss, opt_state = self._perform_training_epoch(
+                x_train=x_train, y_train=y_train, optimizer_state=opt_state)
 
             if verbose:
-                print(f"Epoch {epoch + 1}/{self._epochs_num} - Training Loss: {train_loss:.5f}")
+                message = f"Epoch {epoch + 1}/{self._epochs_num} - train_loss: {training_loss:.5f}"
+                if x_val is not None and y_val is not None:
+                    validation_loss = self._perform_validation_epoch(x_val=x_val, y_val=y_val)
+                    message += f", val_loss: {validation_loss:.5f}"
+                print(message)

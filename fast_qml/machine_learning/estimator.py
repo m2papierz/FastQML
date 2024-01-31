@@ -124,17 +124,48 @@ class QuantumEstimator:
         """
         pass
 
-    @abstractmethod
     def fit(
             self,
-            x_data: np.ndarray,
-            y_data: np.ndarray,
-            learning_rate: float,
-            num_epochs: int,
-            batch_size: int,
-            verbose: bool
-    ) -> np.ndarray:
+            x_train: np.ndarray,
+            y_train: np.ndarray,
+            x_val: np.ndarray = None,
+            y_val: np.ndarray = None,
+            learning_rate: float = 0.01,
+            num_epochs: int = 250,
+            batch_size: int = None,
+            verbose: bool = True
+    ) -> None:
         """
-        Fit the model to the given data.
+        Trains the variational quantum estimator on the provided dataset.
+
+        This method optimizes the weights of the variational circuit using the specified loss function
+        and optimizer. It updates the weights based on the training data over a number of epochs.
+
+        Args:
+            x_train: Input features for training.
+            y_train: Target outputs for training.
+            x_val: Input features for validation.
+            y_val: Target outputs for validation.
+            learning_rate: Learning rate for the optimizer.
+            num_epochs: Number of epochs to run the training.
+            batch_size: Size of batches for training. If None, the whole dataset is used in each iteration.
+            verbose : If True, prints verbose messages during training.
         """
-        raise NotImplementedError("Subclasses must implement this method.")
+        optimizer = self._optimizer(
+            params=self._weights,
+            q_node=self._q_model,
+            loss_fn=self._loss_fn,
+            batch_size=batch_size,
+            epochs_num=num_epochs,
+            learning_rate=learning_rate
+        )
+
+        optimizer.optimize(
+            x_train=x_train,
+            y_train=y_train,
+            x_val=x_val,
+            y_val=y_val,
+            verbose=verbose
+        )
+
+        self._weights = optimizer.weights
