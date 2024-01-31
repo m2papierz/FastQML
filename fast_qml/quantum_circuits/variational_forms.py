@@ -71,7 +71,7 @@ class VariationalForm:
     @abstractmethod
     def _get_params_num(self) -> int:
         """
-        Abstract method to get the total number of parameters.
+        Abstract method for calculating the total number of parameters required for the ansatz.
         """
         raise NotImplementedError("Subclasses must implement this method.")
 
@@ -98,14 +98,58 @@ class VariationalForm:
 
 class Ansatz(VariationalForm):
     """
-   Quantum variational ansatz based on a user-defined variational function. Given variational
-   function needs to include entanglement operations.
+    This class represents a quantum variational ansatz based on a user-defined variational function.
+    It constructs a quantum circuit with a specified number of qubits, controlled gates, and entanglement
+    pattern, repeated a given number of times. The variational function defines the rotation layers
+    within the quantum circuit.
 
    Args:
        n_qubits: Number of qubits in the quantum circuit.
        parameters_num: Number of parameters in the variational function.
-       variational_func: User-defined variational function.
-       reps: Number of repetitions. Defaults to 1.
+       variational_func: User-defined variational function. It must accept a single argument 'params'.
+       entanglement: Entanglement pattern. Defaults to 'linear'.
+       controlled_gate: Controlled gate type. Defaults to 'CNOT'.
+       skip_last_rotations: If True, skips the rotation layer in the last repetition. Defaults to False.
+       reps: Number of repetitions of the variational function and entanglement pattern. Defaults to 1.
+
+    **Example**
+
+    # Import necessary libraries
+    >>> import numpy as np
+    >>> from fast_qml.quantum_circuits.variational_forms import Ansatz
+
+    # Define a user-specific variational function
+    >>> def my_variational_function(params):
+    ...     qml.RX(params[0], wires=[0])
+    ...     qml.RY(params[1], wires=[1])
+    ...     qml.RX(params[2], wires=[2])
+    ...     qml.RY(params[3], wires=[3])
+    ...     qml.RY(params[4], wires=[0])
+    ...     qml.RX(params[5], wires=[2])
+
+    # Initialize parameters for the Ansatz
+    >>> n_qubits = 4
+    >>> parameters_num = 6
+    >>> reps = 2
+
+    # Create an instance of the Ansatz class
+    >>> ansatz = Ansatz(
+    ...     n_qubits=n_qubits,
+    ...     parameters_num=parameters_num,
+    ...     variational_func=my_variational_function,
+    ...     entanglement='reverse_circular',
+    ...     controlled_gate='CNOT',
+    ...     skip_last_rotations=False,
+    ...     reps=reps
+    ... )
+
+    # Initialize randomly parameters and draw circuit
+    >>> params = np.random.randn(ansatz.params_num)
+    >>> print(qml.draw(ansatz.apply)(params))
+    0: ──RX(-0.18)──RY(-0.95)───────╭X─╭●──||──RX(0.89)───RY(0.64)───────╭X─╭●──||──RX(-0.68)──RY(-0.53)─┤
+    1: ──RY(-0.79)───────────────╭X─╰●─│───||──RY(1.38)───────────────╭X─╰●─│───||──RY(0.40)─────────────┤
+    2: ──RX(0.31)───RX(0.19)──╭X─╰●────│───||──RX(-0.11)──RX(0.47)─╭X─╰●────│───||──RX(0.02)───RX(0.37)──┤
+    3: ──RY(-0.28)────────────╰●───────╰X──||──RY(-1.47)───────────╰●───────╰X──||──RY(0.12)─────────────┤
    """
 
     def __init__(
@@ -113,6 +157,9 @@ class Ansatz(VariationalForm):
             n_qubits: int,
             parameters_num: int,
             variational_func: Callable,
+            entanglement: Union[str, list[list[int]]] = 'linear',
+            controlled_gate: str = 'CNOT',
+            skip_last_rotations: bool = False,
             reps: int = 1
     ):
 
@@ -130,28 +177,55 @@ class Ansatz(VariationalForm):
             )
 
         self._variational_function = variational_func
+        self._skip_last_rotations = skip_last_rotations
+
+        self._entanglement = Entangler(
+            n_qubits=n_qubits,
+            c_gate=controlled_gate,
+            entanglement=entanglement
+        )
 
     def _get_params_num(self) -> int:
         """
-        Returns the total number of parameters.
+        Calculates the total number of parameters required for the ansatz.
         """
-        return self._reps * self._parameters_num
+        add_rep = 0 if self._skip_last_rotations else 1
+        return (self._reps + add_rep) * self._parameters_num
+
+    def _apply_rotation_layer(
+            self, params: np.ndarray
+    ) -> None:
+        """
+        Applies the user-defined rotation layer to the quantum circuit.
+
+        Args:
+            params: Array of parameters for the rotation layer.
+        """
+        self._variational_function(params)
 
     def _variational_func(
             self,
             params: np.ndarray
     ) -> None:
         """
-        Calls the user-defined variational function.
+        Defines and applies the variational form of the quantum circuit.
+
+        Args:
+            params: Array of parameters for the variational function.
         """
-        return self._variational_function(params)
+        self._apply_rotation_layer(params=params)
+        self._entanglement.apply()
+        qml.Barrier()
 
     def apply(
             self,
             params: np.ndarray
     ) -> None:
         """
-        Applies the variational form to the quantum circuit.
+        Applies the variational ansatz to the quantum circuit.
+
+        Args:
+            params: Array of parameters for the entire variational form.
         """
         if len(params) != self.params_num:
             ValueError(
@@ -159,10 +233,21 @@ class Ansatz(VariationalForm):
                 f"Expected {self.params_num}, got {len(params)}."
             )
 
-        block_params_n = self._parameters_num
+        if self._skip_last_rotations:
+            block_params_n = int(self._get_params_num() / self._reps)
+        else:
+            block_params_n = int(self._get_params_num() / (self._reps + 1))
+
         for r in range(self._reps):
             params_subset = params[r * block_params_n: (r + 1) * block_params_n]
             self._variational_func(params=params_subset)
+
+        if not self._skip_last_rotations:
+            last_params_subset = params[
+                            self._reps * block_params_n:
+                            (self._reps + 1) * block_params_n
+                        ]
+            self._apply_rotation_layer(params=last_params_subset)
 
 
 class TwoLocal(VariationalForm):
@@ -176,7 +261,31 @@ class TwoLocal(VariationalForm):
         rotation_blocks: List of rotation gate types.
         controlled_gate: Controlled gate type. Defaults to 'CNOT'.
         entanglement: Entanglement pattern. Defaults to 'linear'.
+        skip_last_rotations (bool): Whether to skip rotations in the last repetition, default is False.
         reps: Number of repetitions. Defaults to 1.
+
+    **Example**
+
+    # Import necessary libraries
+    >>> import numpy as np
+    >>> from fast_qml.quantum_circuits.variational_forms import TwoLocal
+
+    # Create an instance of the TwoLocal class
+    >>> two_local = TwoLocal(
+    ...     n_qubits=4,
+    ...     controlled_gate='CZ',
+    ...     entanglement='circular',
+    ...     skip_last_rotations=False,
+    ...     reps=1
+    ... )
+
+    # Initialize randomly parameters and draw circuit
+    >>> params = np.random.randn(two_local.params_num)
+    >>> print(qml.draw(two_local.apply)(params))
+    0: ──RY(-1.39)─╭●───────╭Z──||──RY(-0.78)─┤
+    1: ──RY(-0.43)─╰Z─╭●────│───||──RY(0.70)──┤
+    2: ──RY(-1.07)────╰Z─╭●─│───||──RY(0.25)──┤
+    3: ──RY(1.27)────────╰Z─╰●──||──RY(-0.70)─┤
     """
     def __init__(
             self,
@@ -184,6 +293,7 @@ class TwoLocal(VariationalForm):
             rotation_blocks: list[str] = None,
             controlled_gate: str = 'CNOT',
             entanglement: Union[str, list[list[int]]] = 'linear',
+            skip_last_rotations: bool = False,
             reps: int = 1
     ):
         super().__init__(
@@ -203,31 +313,52 @@ class TwoLocal(VariationalForm):
             for block_gate in rotation_blocks or ['RY']
         ]
 
+        self._skip_last_rotations = skip_last_rotations
+
     def _get_params_num(self) -> int:
         """
-        Returns the total number of parameters.
+        Calculates the total number of parameters required for the ansatz.
         """
+        add_rep = 0 if self._skip_last_rotations else 1
         rot_block_n = len(self._rotation_blocks)
-        return self._reps * self._n_qubits * rot_block_n
+        return (self._reps + add_rep) * self._n_qubits * rot_block_n
+
+    def _apply_rotation_layer(
+            self, params: np.ndarray
+    ) -> None:
+        """
+        Applies rotation layer to the quantum circuit.
+
+        Args:
+            params: Array of parameters for the rotation layer.
+        """
+        for j, rot_ in enumerate(self._rotation_blocks):
+            for q in range(self._n_qubits):
+                rot_(params[j * self._n_qubits + q], wires=[q])
 
     def _variational_func(
             self,
             params: np.ndarray
     ) -> None:
         """
-        Defines the variational form.
+        Defines and applies the variational form of the quantum circuit.
+
+        Args:
+            params: Array of parameters for the variational function.
         """
-        for j, rot_ in enumerate(self._rotation_blocks):
-            for q in range(self._n_qubits):
-                rot_(params[j * self._n_qubits + q], wires=[q])
+        self._apply_rotation_layer(params=params)
         self._entanglement.apply()
+        qml.Barrier()
 
     def apply(
             self,
             params: np.ndarray
     ) -> None:
         """
-        Applies the variational form to the quantum circuit.
+        Applies the variational ansatz to the quantum circuit.
+
+        Args:
+            params: Array of parameters for the entire variational form.
         """
         if len(params) != self.params_num:
             ValueError(
@@ -235,10 +366,21 @@ class TwoLocal(VariationalForm):
                 f"Expected {self.params_num}, got {len(params)}."
             )
 
-        block_params_n = int(self._get_params_num() / self._reps)
+        if self._skip_last_rotations:
+            block_params_n = int(self._get_params_num() / self._reps)
+        else:
+            block_params_n = int(self._get_params_num() / (self._reps + 1))
+
         for r in range(self._reps):
             params_subset = params[r * block_params_n: (r + 1) * block_params_n]
             self._variational_func(params=params_subset)
+
+        if not self._skip_last_rotations:
+            last_params_subset = params[
+                            self._reps * block_params_n:
+                            (self._reps + 1) * block_params_n
+                        ]
+            self._apply_rotation_layer(params=last_params_subset)
 
 
 class EfficientSU2(TwoLocal):
@@ -254,12 +396,36 @@ class EfficientSU2(TwoLocal):
         rotation_blocks: List of rotation gate types.
         entanglement: Entanglement pattern. Defaults to 'linear'.
         reps: Number of repetitions. Defaults to 1.
+
+    **Example**
+
+    # Import necessary libraries
+    >>> import numpy as np
+    >>> from fast_qml.quantum_circuits.variational_forms import EfficientSU2
+
+    # Create an instance of the EfficientSU2 class
+
+    >>> su2 = EfficientSU2(
+    ...     n_qubits=3,
+    ...     rotation_blocks=['RX', 'RY'],
+    ...     entanglement='circular',
+    ...     skip_last_rotations=True,
+    ...     reps=2
+    ... )
+
+    # Initialize randomly parameters and draw circuit
+    >>> params = np.random.randn(su2.params_num)
+    >>> print(qml.draw(su2.apply)(params))
+    0: ──RX(-1.17)──RY(0.60)──╭●────╭X──||──RX(-1.32)──RY(1.19)──╭●────╭X──||─┤
+    1: ──RX(-0.77)──RY(-0.65)─╰X─╭●─│───||──RX(0.25)───RY(-1.38)─╰X─╭●─│───||─┤
+    2: ──RX(-0.98)──RY(-1.45)────╰X─╰●──||──RX(-0.14)──RY(-0.55)────╰X─╰●──||─┤
     """
     def __init__(
             self,
             n_qubits: int,
             rotation_blocks: list[str] = None,
             entanglement: str = 'linear',
+            skip_last_rotations: bool = False,
             reps: int = 1
     ):
         if rotation_blocks is None:
@@ -274,6 +440,7 @@ class EfficientSU2(TwoLocal):
             rotation_blocks=rotation_blocks,
             controlled_gate='CNOT',
             entanglement=entanglement,
+            skip_last_rotations=skip_last_rotations,
             reps=reps
         )
 
@@ -286,11 +453,34 @@ class TreeTensor(VariationalForm):
     Args:
         n_qubits: Number of qubits in the quantum circuit.
         controlled_gate: Controlled gate type. Defaults to 'CNOT'.
+
+    **Example**
+
+    # Import necessary libraries
+    >>> import numpy as np
+    >>> from fast_qml.quantum_circuits.variational_forms import TreeTensor
+
+    # Create an instance of the EfficientSU2 class
+
+    >>> tree_tensor = TreeTensor(
+    ...     n_qubits=4,
+    ...     controlled_gate='CNOT',
+    ...     reps=2
+    ... )
+
+    # Initialize randomly parameters and draw circuit
+    >>> params = np.random.randn(tree_tensor.params_num)
+    >>> print(qml.draw(tree_tensor.apply)(params))
+    0: ──RY(-0.11)─╭●──RY(0.77)──╭●──RY(-1.06)──||──RY(0.77)──╭●──RY(-0.29)─╭●──RY(0.10)──||─┤
+    1: ──RY(0.38)──╰X────────────│──────────────||──RY(-2.16)─╰X────────────│─────────────||─┤
+    2: ──RY(-0.17)─╭●──RY(-0.66)─╰X─────────────||──RY(-0.24)─╭●──RY(1.02)──╰X────────────||─┤
+    3: ──RY(0.80)──╰X───────────────────────────||──RY(-1.17)─╰X──────────────────────────||─┤
     """
     def __init__(
             self,
             n_qubits: int,
-            controlled_gate: str = 'CNOT'
+            controlled_gate: str = 'CNOT',
+            reps: int = 1
     ):
         # Check if n_qubits is a power of two
         if not (n_qubits & (n_qubits - 1)) == 0:
@@ -299,51 +489,62 @@ class TreeTensor(VariationalForm):
                 "to be a power of two."
             )
 
-        reps_num = int(np.log2(n_qubits))
+        self._layers = int(np.log2(n_qubits))
 
         super().__init__(
             n_qubits=n_qubits,
             controlled_gate=controlled_gate,
-            reps=reps_num
+            reps=reps
         )
 
     def _get_params_num(self) -> int:
         """
-        Returns the total number of parameters.
+        Calculates the total number of parameters required for the ansatz.
         """
-        return 2 * self._n_qubits - 1
+        return (2 * self._n_qubits - 1) * self._layers
 
     def _variational_func(
             self,
             params: np.ndarray
     ) -> None:
         """
-        Defines the variational form.
+        Defines and applies the variational form of the quantum circuit.
+
+        Args:
+            params: Array of parameters for the variational function.
         """
         for i in range(self._n_qubits):
             qml.RY(params[i], wires=[i])
 
         n_qubits = self._n_qubits
-        for r in range(1, self._reps + 1):
-            for s in range(0, 2 ** (self._reps - r)):
+        for r in range(1, self._layers + 1):
+            for s in range(0, 2 ** (self._layers - r)):
                 target_wire = (s * 2 ** r)
                 control_wire = target_wire + (2 ** (r - 1))
 
                 qml.CNOT(wires=[target_wire, control_wire])
                 qml.RY(params[n_qubits + s], wires=[target_wire])
 
-            n_qubits += 2 ** (self._reps - r)
+            n_qubits += 2 ** (self._layers - r)
+        qml.Barrier()
 
     def apply(
             self,
             params: np.ndarray
     ) -> None:
         """
-        Applies the variational form to the quantum circuit.
+        Applies the variational ansatz to the quantum circuit.
+
+        Args:
+            params: Array of parameters for the entire variational form.
         """
         if len(params) != self.params_num:
             ValueError(
                 f"Invalid parameters shape. "
                 f"Expected {self.params_num}, got {len(params)}."
             )
-        self._variational_func(params=params)
+
+        block_params_n = int(self._get_params_num() / self._reps)
+        for r in range(self._reps):
+            params_subset = params[r * block_params_n: (r + 1) * block_params_n]
+            self._variational_func(params=params_subset)
