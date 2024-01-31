@@ -19,15 +19,19 @@ from pennylane.ops.op_math.controlled import ControlledOp
 
 class Entangler:
     """
-    This class generates various entanglement patterns for quantum circuits.
+    A class that creates entanglement patterns for quantum circuits using controlled gates. It supports
+    predefined entanglement patterns such as linear, circular, full, and their reverse variants. Additionally,
+    it allows for custom entanglement schemes.
 
     Args:
-        n_qubits: Number of qubits in the quantum circuit.
-        c_gate: Controlled gate type. Defaults to 'CNOT'.
-        entanglement: Entanglement pattern or custom pattern. Defaults to 'linear'.
+        n_qubits: The number of qubits in the quantum circuit.
+        c_gate: The type of controlled gate to use. Defaults to 'CNOT'.
+        entanglement: The entanglement pattern.Can be a string for predefined patterns or a list of qubit
+        pairs for custom entanglement. Defaults to 'linear'.
 
     Attributes:
-        ENTANGLEMENT_FUNCTIONS (dict): Mapping of entanglement pattern names to their corresponding functions.
+        ENTANGLEMENT_FUNCTIONS (dict): A mapping from entanglement pattern names to their
+            corresponding methods for applying these patterns.
     """
 
     ENTANGLEMENT_FUNCTIONS = {
@@ -52,6 +56,19 @@ class Entangler:
     def _get_controlled_gate(
             c_gate: str
     ) -> Any:
+        """
+        Retrieves the controlled gate function based on the specified gate name.
+
+        Args:
+            c_gate: The name of the controlled gate.
+
+        Returns:
+            The controlled gate function.
+
+        Raises:
+            ValueError: If the specified gate is not a valid Pennylane controlled gate or if
+                the gate attribute does not exist.
+        """
         try:
             gate_function = getattr(qml, c_gate)
             if not issubclass(gate_function, ControlledOp) and c_gate != 'CNOT':
@@ -70,6 +87,14 @@ class Entangler:
             controlled_gate: Any,
             reverse: bool = False
     ) -> None:
+        """
+        Applies a linear entanglement pattern to the quantum circuit.
+
+        Args:
+            n_qubits: The number of qubits in the circuit.
+            controlled_gate: The controlled gate function to apply.
+            reverse : If True, applies the entanglement in reverse order. Defaults to False.
+        """
         qubit_range = range(n_qubits - 1) if not reverse else range(n_qubits - 1, 0, -1)
         for i in qubit_range:
             controlled_gate(wires=[i, i + (1 if not reverse else -1)])
@@ -80,6 +105,14 @@ class Entangler:
             controlled_gate: Any,
             reverse: bool = False
     ) -> None:
+        """
+        Applies a circular entanglement pattern to the quantum circuit.
+
+        Args:
+            n_qubits: The number of qubits in the circuit.
+            controlled_gate: The controlled gate function to apply.
+            reverse: If True, applies the entanglement in reverse order. Defaults to False.
+        """
         Entangler._apply_linear(n_qubits, controlled_gate, reverse)
         controlled_gate(wires=[n_qubits - 1, 0] if not reverse else [0, n_qubits - 1])
 
@@ -88,6 +121,13 @@ class Entangler:
             n_qubits: int,
             controlled_gate: Any
     ) -> None:
+        """
+       Applies a full entanglement pattern to the quantum circuit.
+
+       Args:
+           n_qubits: The number of qubits in the circuit.
+           controlled_gate: The controlled gate function to apply.
+       """
         for i in range(n_qubits - 1):
             for j in range(i + 1, n_qubits):
                 controlled_gate(wires=[i, j])
@@ -96,6 +136,16 @@ class Entangler:
             self,
             entanglement_scheme: List[List[int]]
     ) -> None:
+        """
+        Applies a custom entanglement pattern to the quantum circuit.
+
+        Args:
+            entanglement_scheme: A list of qubit pairs specifying the custom entanglement pattern.
+
+        Raises:
+            ValueError: If the entanglement scheme is invalid or contains qubit indices
+                outside the range of available qubits.
+        """
         for pair in entanglement_scheme:
             if len(pair) != 2 or not all(0 <= qubit < self._n_qubits for qubit in pair):
                 raise ValueError(
@@ -105,6 +155,12 @@ class Entangler:
             self._c_gate(wires=pair)
 
     def apply(self) -> None:
+        """
+        Applies the specified entanglement pattern to the quantum circuit.
+
+        Raises:
+            ValueError: If the entanglement type is not recognized or supported.
+        """
         if isinstance(self._entanglement, list):
             self._apply_custom(self._entanglement)
         else:
