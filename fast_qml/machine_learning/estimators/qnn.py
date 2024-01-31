@@ -322,9 +322,11 @@ class QNNClassifier(QNN):
             a single probability for each sample. For multi-class classification, this will be a 2D array
             where each row corresponds to a sample and each column corresponds to a class.
         """
-        return np.array(
-            [self._q_model(weights=self._weights, x_data=_x) for _x in x]
-        ).ravel()
+        probabilities = [
+            self._q_model(self._weights, np.array([sample]))
+            for sample in x
+        ]
+        return np.array(probabilities).ravel()
 
     def predict(
             self,
