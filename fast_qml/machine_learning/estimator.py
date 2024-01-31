@@ -20,6 +20,7 @@ from fast_qml.quantum_circuits.feature_maps import FeatureMap
 from fast_qml.quantum_circuits.variational_forms import VariationalForm
 from fast_qml.machine_learning.optimizer import DefaultOptimizer, JITOptimizer
 from fast_qml.machine_learning.loss_functions import MSELoss
+from fast_qml.machine_learning.callbacks import EarlyStopping
 
 
 class QuantumEstimator:
@@ -131,8 +132,9 @@ class QuantumEstimator:
             x_val: np.ndarray = None,
             y_val: np.ndarray = None,
             learning_rate: float = 0.01,
-            num_epochs: int = 250,
+            num_epochs: int = 500,
             batch_size: int = None,
+            early_stopping: EarlyStopping = None,
             verbose: bool = True
     ) -> None:
         """
@@ -149,7 +151,11 @@ class QuantumEstimator:
             learning_rate: Learning rate for the optimizer.
             num_epochs: Number of epochs to run the training.
             batch_size: Size of batches for training. If None, the whole dataset is used in each iteration.
+            early_stopping: Instance of EarlyStopping to be used during training.
             verbose : If True, prints verbose messages during training.
+
+        If early stopping is configured and validation data is provided, the training process will
+        stop early if no improvement is seen in the validation loss for a specified number of epochs.
         """
         optimizer = self._optimizer(
             params=self._weights,
@@ -157,7 +163,8 @@ class QuantumEstimator:
             loss_fn=self._loss_fn,
             batch_size=batch_size,
             epochs_num=num_epochs,
-            learning_rate=learning_rate
+            learning_rate=learning_rate,
+            early_stopping=early_stopping
         )
 
         optimizer.optimize(

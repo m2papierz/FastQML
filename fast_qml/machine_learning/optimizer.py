@@ -35,6 +35,7 @@ from jax.example_libraries.optimizers import OptimizerState
 
 import fast_qml
 from fast_qml import QubitDevice
+from fast_qml.machine_learning.callbacks import EarlyStopping
 
 
 class Optimizer:
@@ -53,6 +54,7 @@ class Optimizer:
         _batch_size: Batch size for training.
         _learning_rate: Learning rate.
         _np_module: Numpy module (Pennylane or JAX), depending on the execution device.
+        _early_stopping: Instance of EarlyStopping to be used during training.
     """
 
     def __init__(
@@ -62,7 +64,8 @@ class Optimizer:
             loss_fn: Callable,
             epochs_num: int,
             learning_rate: float,
-            batch_size: int
+            batch_size: int,
+            early_stopping: EarlyStopping = None
     ):
         self._params = params
         self._q_node = q_node
@@ -71,6 +74,7 @@ class Optimizer:
         self._batch_size = batch_size
         self._learning_rate = learning_rate
 
+        self._early_stopping = early_stopping
         self._np_module = self._get_numpy_module()
 
     @staticmethod
@@ -198,7 +202,8 @@ class DefaultOptimizer(Optimizer):
             learning_rate: float,
             epochs_num: int,
             batch_size: int,
-            loss_fn: Callable
+            loss_fn: Callable,
+            early_stopping: EarlyStopping = None
     ):
         super().__init__(
             params=params,
@@ -206,7 +211,8 @@ class DefaultOptimizer(Optimizer):
             loss_fn=loss_fn,
             epochs_num=epochs_num,
             batch_size=batch_size,
-            learning_rate=learning_rate
+            learning_rate=learning_rate,
+            early_stopping=early_stopping
         )
         self._opt = qml.AdamOptimizer(self._learning_rate)
 
@@ -281,19 +287,35 @@ class DefaultOptimizer(Optimizer):
             x_val: Optional validation input data.
             y_val: Optional validation target data.
             verbose: Flag to control verbosity.
+
+        If early stopping is configured and validation data is provided, the training process will
+        stop early if no improvement is seen in the validation loss for a specified number of epochs.
         """
         self._validate_data(x_train, y_train, data_type='Training')
         if x_val is not None and y_val is not None:
             self._validate_data(x_val, y_val, data_type='Validation')
 
+        message = ""
         for epoch in range(self._epochs_num):
             training_loss = self._perform_training_epoch(x_train=x_train, y_train=y_train)
 
             if verbose:
                 message = f"Epoch {epoch + 1}/{self._epochs_num} - train_loss: {training_loss:.5f}"
-                if x_val is not None and y_val is not None:
-                    validation_loss = self._perform_validation_epoch(x_val=x_val, y_val=y_val)
+
+            if x_val is not None and y_val is not None:
+                validation_loss = self._perform_validation_epoch(x_val=x_val, y_val=y_val)
+                if verbose:
                     message += f", val_loss: {validation_loss:.5f}"
+
+                # Early stopping logic
+                if self._early_stopping:
+                    self._early_stopping(validation_loss)
+                    if self._early_stopping.stop_training:
+                        if verbose:
+                            print(f"Stopping early at epoch {epoch + 1}.")
+                        break
+
+            if verbose:
                 print(message)
 
 
@@ -323,7 +345,8 @@ class JITOptimizer(Optimizer):
             loss_fn: Callable,
             epochs_num: int,
             learning_rate: float,
-            batch_size: int = None
+            batch_size: int = None,
+            early_stopping: EarlyStopping = None
     ):
         super().__init__(
             params=params,
@@ -331,7 +354,8 @@ class JITOptimizer(Optimizer):
             loss_fn=loss_fn,
             batch_size=batch_size,
             epochs_num=epochs_num,
-            learning_rate=learning_rate
+            learning_rate=learning_rate,
+            early_stopping=early_stopping
         )
         self._opt = optax.adam(learning_rate=learning_rate)
 
@@ -507,6 +531,9 @@ class JITOptimizer(Optimizer):
             x_val: Optional validation input data.
             y_val: Optional validation target data.
             verbose: Flag to control verbosity.
+
+        If early stopping is configured and validation data is provided, the training process will
+        stop early if no improvement is seen in the validation loss for a specified number of epochs.
         """
         self._validate_data(x_train, y_train, data_type='Training')
         if x_val is not None and y_val is not None:
@@ -514,13 +541,26 @@ class JITOptimizer(Optimizer):
 
         opt_state = self._opt.init(self._params)
 
+        message = ""
         for epoch in range(self._epochs_num):
             training_loss, opt_state = self._perform_training_epoch(
                 x_train=x_train, y_train=y_train, optimizer_state=opt_state)
 
             if verbose:
                 message = f"Epoch {epoch + 1}/{self._epochs_num} - train_loss: {training_loss:.5f}"
-                if x_val is not None and y_val is not None:
-                    validation_loss = self._perform_validation_epoch(x_val=x_val, y_val=y_val)
+
+            if x_val is not None and y_val is not None:
+                validation_loss = self._perform_validation_epoch(x_val=x_val, y_val=y_val)
+                if verbose:
                     message += f", val_loss: {validation_loss:.5f}"
+
+                # Early stopping logic
+                if self._early_stopping:
+                    self._early_stopping(validation_loss)
+                    if self._early_stopping.stop_training:
+                        if verbose:
+                            print(f"Stopping early at epoch {epoch + 1}.")
+                        break
+
+            if verbose:
                 print(message)
