@@ -147,6 +147,26 @@ class QNN(QuantumEstimator):
             ]
         return _circuit()
 
+    def draw_circuit(self) -> None:
+        """
+        Draws the quantum circuit of the model. This method is particularly useful for debugging
+        and understanding the structure of the quantum circuit.
+        """
+        if isinstance(self._feature_map, AmplitudeEmbedding):
+            aux_input = np.random.randn(2 ** self._n_qubits)
+        else:
+            aux_input = np.random.randn(self._n_qubits)
+
+        def draw_circuit(params, inputs):
+            if not self._data_reuploading:
+                self._feature_map.apply(features=inputs)
+
+            for i in range(self._layers_num):
+                self._quantum_layer(
+                    weights=params[i], x_data=inputs)
+
+        print(qml.draw(draw_circuit)(self._weights, aux_input))
+
     def fit(
             self,
             x_data: np.ndarray,

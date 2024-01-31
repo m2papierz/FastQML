@@ -118,6 +118,13 @@ class QuantumEstimator:
         raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
+    def draw_circuit(self) -> None:
+        """
+        Abstract method for drawing the quantum circuit of the model.
+        """
+        pass
+
+    @abstractmethod
     def fit(
             self,
             x_data: np.ndarray,

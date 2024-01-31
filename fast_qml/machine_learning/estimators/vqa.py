@@ -24,7 +24,7 @@ import numpy as np
 import pennylane as qml
 
 from fast_qml.machine_learning.estimator import QuantumEstimator
-from fast_qml.quantum_circuits.feature_maps import FeatureMap
+from fast_qml.quantum_circuits.feature_maps import FeatureMap, AmplitudeEmbedding
 from fast_qml.quantum_circuits.variational_forms import VariationalForm
 from fast_qml.machine_learning.loss_functions import (
     MSELoss, HuberLoss, LogCoshLoss, BinaryCrossEntropyLoss, CrossEntropyLoss
@@ -118,6 +118,21 @@ class VariationalQuantumEstimator(QuantumEstimator):
                 for i in range(self._measurements_num)
             ]
         return _circuit()
+
+    def draw_circuit(self) -> None:
+        """
+        Draws the quantum circuit of the model. This method is particularly useful for debugging
+        and understanding the structure of the quantum circuit.
+        """
+        if isinstance(self._feature_map, AmplitudeEmbedding):
+            aux_input = np.random.randn(2 ** self._n_qubits)
+        else:
+            aux_input = np.random.randn(self._n_qubits)
+
+        def draw_circuit(params, inputs):
+            self._quantum_layer(params, inputs)
+
+        print(qml.draw(draw_circuit)(self._weights, aux_input))
 
     def fit(
             self,
