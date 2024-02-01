@@ -165,6 +165,7 @@ class QNN(QuantumEstimator):
                 self._quantum_layer(
                     weights=params[i], x_data=inputs)
 
+        aux_input = np.array([aux_input])
         print(qml.draw(draw_circuit)(self._weights, aux_input))
 
 
@@ -308,7 +309,7 @@ class QNNClassifier(QNN):
             self._q_model(self._weights, np.array([sample]))
             for sample in x
         ]
-        return np.array(probabilities).ravel()
+        return np.array(probabilities)
 
     def predict(
             self,

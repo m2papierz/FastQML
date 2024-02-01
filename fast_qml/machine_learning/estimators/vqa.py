@@ -132,6 +132,7 @@ class VariationalQuantumEstimator(QuantumEstimator):
         def draw_circuit(params, inputs):
             self._quantum_layer(params, inputs)
 
+        aux_input = np.array([aux_input])
         print(qml.draw(draw_circuit)(self._weights, aux_input))
 
 
