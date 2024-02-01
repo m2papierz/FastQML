@@ -35,7 +35,7 @@ from jax.example_libraries.optimizers import OptimizerState
 
 import fast_qml
 from fast_qml import QubitDevice
-from fast_qml.machine_learning.callbacks import EarlyStopping
+from fast_qml.machine_learning.callbacks import EarlyStopping, BestModelCheckpoint
 
 
 class Optimizer:
@@ -65,7 +65,8 @@ class Optimizer:
             epochs_num: int,
             learning_rate: float,
             batch_size: int,
-            early_stopping: EarlyStopping = None
+            early_stopping: EarlyStopping = None,
+            retrieve_best_weights: bool = True
     ):
         self._params = params
         self._q_node = q_node
@@ -76,6 +77,10 @@ class Optimizer:
 
         self._early_stopping = early_stopping
         self._np_module = self._get_numpy_module()
+
+        self._best_model_checkpoint = None
+        if retrieve_best_weights:
+            self._best_model_checkpoint = BestModelCheckpoint()
 
     @staticmethod
     def _get_numpy_module():
@@ -203,7 +208,8 @@ class DefaultOptimizer(Optimizer):
             epochs_num: int,
             batch_size: int,
             loss_fn: Callable,
-            early_stopping: EarlyStopping = None
+            early_stopping: EarlyStopping = None,
+            retrieve_best_weights: bool = True
     ):
         super().__init__(
             params=params,
@@ -212,7 +218,8 @@ class DefaultOptimizer(Optimizer):
             epochs_num=epochs_num,
             batch_size=batch_size,
             learning_rate=learning_rate,
-            early_stopping=early_stopping
+            early_stopping=early_stopping,
+            retrieve_best_weights=retrieve_best_weights
         )
         self._opt = qml.AdamOptimizer(self._learning_rate)
 
@@ -346,7 +353,8 @@ class JITOptimizer(Optimizer):
             epochs_num: int,
             learning_rate: float,
             batch_size: int = None,
-            early_stopping: EarlyStopping = None
+            early_stopping: EarlyStopping = None,
+            retrieve_best_weights: bool = True
     ):
         super().__init__(
             params=params,
@@ -355,7 +363,8 @@ class JITOptimizer(Optimizer):
             batch_size=batch_size,
             epochs_num=epochs_num,
             learning_rate=learning_rate,
-            early_stopping=early_stopping
+            early_stopping=early_stopping,
+            retrieve_best_weights=retrieve_best_weights
         )
         self._opt = optax.adam(learning_rate=learning_rate)
 
@@ -492,7 +501,11 @@ class JITOptimizer(Optimizer):
 
         return average_loss, optimizer_state
 
-    def _perform_validation_epoch(self, x_val: np.ndarray, y_val: np.ndarray) -> float:
+    def _perform_validation_epoch(
+            self,
+            x_val: np.ndarray,
+            y_val: np.ndarray
+    ) -> float:
         """
         Performs a validation step.
 
@@ -551,6 +564,10 @@ class JITOptimizer(Optimizer):
 
             if x_val is not None and y_val is not None:
                 validation_loss = self._perform_validation_epoch(x_val=x_val, y_val=y_val)
+
+                if self._best_model_checkpoint:
+                    self._best_model_checkpoint.update(self._params, validation_loss)
+
                 if verbose:
                     message += f", val_loss: {validation_loss:.5f}"
 
@@ -561,6 +578,10 @@ class JITOptimizer(Optimizer):
                         if verbose:
                             print(f"Stopping early at epoch {epoch + 1}.")
                         break
+
+            # Load best model parameters at the end of training
+            if self._best_model_checkpoint:
+                self._best_model_checkpoint.load_best_model(self)
 
             if verbose:
                 print(message)

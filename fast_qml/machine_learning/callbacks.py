@@ -7,6 +7,7 @@
 # See the LICENSE file in the project root or <https://www.gnu.org/licenses/gpl-3.0.html>.
 #
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
+import numpy as np
 
 
 class EarlyStopping:
@@ -63,3 +64,45 @@ class EarlyStopping:
             if self.wait >= self.patience:
                 self.stopped_epoch = True
                 self.stop_training = True
+
+
+class BestModelCheckpoint:
+    """
+    A callback class for tracking and storing the best model parameters based on validation loss during training.
+
+    This class is designed to be used with an optimizer during the training process. It keeps track of the best
+    model parameters when provided with the current model parameters and validation loss at each epoch.
+
+    Attributes:
+        best_params: Stores the best model parameters encountered during training.
+        best_val_loss: Records the lowest validation loss encountered during training.
+    """
+    def __init__(self):
+        self.best_params = None
+        self.best_val_loss = float('inf')
+
+    def update(
+            self,
+            current_params: np.ndarray,
+            current_val_loss: float
+    ) -> None:
+        """
+        Updates the best model parameters if the current validation loss is lower.
+
+        Args:
+            current_params: Current parameters of the model.
+            current_val_loss: Current validation loss.
+        """
+        if current_val_loss < self.best_val_loss:
+            self.best_params = current_params
+            self.best_val_loss = current_val_loss
+
+    def load_best_model(self, optimizer) -> None:
+        """
+        Loads the best model parameters into the optimizer.
+
+        Args:
+            optimizer: The optimizer instance to update.
+        """
+        if self.best_params is not None:
+            optimizer._params = self.best_params
