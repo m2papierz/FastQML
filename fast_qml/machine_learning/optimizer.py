@@ -311,6 +311,10 @@ class DefaultOptimizer(Optimizer):
 
             if x_val is not None and y_val is not None:
                 validation_loss = self._perform_validation_epoch(x_val=x_val, y_val=y_val)
+
+                if self._best_model_checkpoint:
+                    self._best_model_checkpoint.update(self._params, validation_loss)
+
                 if verbose:
                     message += f", val_loss: {validation_loss:.5f}"
 
@@ -321,6 +325,10 @@ class DefaultOptimizer(Optimizer):
                         if verbose:
                             print(f"Stopping early at epoch {epoch + 1}.")
                         break
+
+            # Load best model parameters at the end of training
+            if self._best_model_checkpoint:
+                self._best_model_checkpoint.load_best_model(self)
 
             if verbose:
                 print(message)
