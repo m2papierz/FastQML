@@ -211,7 +211,9 @@ class QNNRegressor(QNN):
         Args:
             x: An array of input data.
         """
-        return self._q_model(weights=self._weights, x_data=x)
+        return np.array(
+            [self._q_model(weights=self._weights, x_data=_x) for _x in x]
+        ).ravel()
 
 
 class QNNClassifier(QNN):
