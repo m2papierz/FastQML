@@ -14,8 +14,7 @@ from abc import abstractmethod
 import numpy as np
 import pennylane as qml
 
-import fast_qml
-from fast_qml import QubitDevice
+from fast_qml import device_manager, QubitDevice
 from fast_qml.quantum_circuits.feature_maps import FeatureMap
 from fast_qml.quantum_circuits.variational_forms import VariationalForm
 from fast_qml.machine_learning.optimizer import DefaultOptimizer, JITOptimizer
@@ -70,11 +69,11 @@ class QuantumEstimator:
         """
         Set up the quantum device and optimizer based on the current device configuration.
         """
-        if fast_qml.DEVICE == QubitDevice.CPU.value:
+        if device_manager.device == QubitDevice.CPU.value:
             self._interface = 'auto'
             self._optimizer = DefaultOptimizer
             self._device = qml.device("default.qubit", wires=self._n_qubits)
-        elif fast_qml.DEVICE == QubitDevice.CPU_JAX.value:
+        elif device_manager.device == QubitDevice.CPU_JAX.value:
             self._interface = 'jax'
             self._optimizer = JITOptimizer
             self._optimizer.register_pytree_node()

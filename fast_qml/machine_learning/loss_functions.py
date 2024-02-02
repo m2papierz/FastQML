@@ -33,9 +33,8 @@ Example:
 import importlib
 from abc import abstractmethod
 
-import fast_qml
 import numpy as np
-from fast_qml import QubitDevice
+from fast_qml import device_manager, QubitDevice
 
 
 class LossFunction:
@@ -65,9 +64,9 @@ class LossFunction:
         This method checks the current configuration set in fast_qml.DEVICE and returns
         the corresponding.
         """
-        if fast_qml.DEVICE == QubitDevice.CPU.value:
+        if device_manager.device == QubitDevice.CPU.value:
             return importlib.import_module('pennylane.numpy')
-        elif fast_qml.DEVICE == QubitDevice.CPU_JAX.value:
+        elif device_manager.device == QubitDevice.CPU_JAX.value:
             return importlib.import_module('jax.numpy')
         else:
             NotImplementedError()

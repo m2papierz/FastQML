@@ -33,8 +33,7 @@ import pennylane as qml
 from jax import tree_util
 from jax.example_libraries.optimizers import OptimizerState
 
-import fast_qml
-from fast_qml import QubitDevice
+from fast_qml import device_manager, QubitDevice
 from fast_qml.machine_learning.callbacks import EarlyStopping, BestModelCheckpoint
 
 
@@ -90,9 +89,9 @@ class Optimizer:
         Returns:
             module: The numpy module corresponding to the current quantum device.
         """
-        if fast_qml.DEVICE == QubitDevice.CPU.value:
+        if device_manager.device == QubitDevice.CPU.value:
             return importlib.import_module('pennylane.numpy')
-        elif fast_qml.DEVICE == QubitDevice.CPU_JAX.value:
+        elif device_manager.device == QubitDevice.CPU_JAX.value:
             return importlib.import_module('jax.numpy')
         else:
             NotImplementedError()
