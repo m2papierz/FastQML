@@ -31,9 +31,9 @@ import optax
 import numpy as np
 import pennylane as qml
 
-from jax import tree_util
 from jax.example_libraries.optimizers import OptimizerState
 from jax import numpy as jnp
+from jax.tree_util import register_pytree_node_class
 
 from fast_qml.machine_learning.callbacks import EarlyStopping, BestModelCheckpoint
 
@@ -84,10 +84,33 @@ class Optimizer:
         if retrieve_best_weights:
             self._best_model_checkpoint = BestModelCheckpoint()
 
+    def tree_flatten(self):
+        """
+        Prepares the class instance for JAX tree operations. This method is used
+        for JAX automatic differentiation and is required for the class to work
+        with jax.jit optimizations.
+        """
+        children = [self._c_params, self._q_params]
+        aux_data = {
+            'model': self._model,
+            'learning_rate': self._learning_rate,
+            'batch_size': self._batch_size,
+            'epochs_num': self._epochs_num,
+            'loss_fn': self._loss_fun
+        }
+        return children, aux_data
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        """
+       Reconstructs the class instance from JAX tree operations.
+       """
+        return cls(*children, **aux_data)
+
     @property
     def weights(
             self
-    ) -> Union[jnp.ndarray, Tuple[jnp.ndarray, jnp.ndarray]]:
+    ) -> Union[jnp.ndarray, Dict[str, Mapping[str, jnp.ndarray]], Tuple]:
         """
         Property to get the current model parameters.
         """
@@ -105,42 +128,6 @@ class Optimizer:
 
         # If neither parameter is set raise an error.
         raise ValueError("No model parameters are set.")
-
-    def _tree_flatten(self):
-        """
-        Prepares the class instance for JAX tree operations. This method is used
-        for JAX automatic differentiation and is required for the class to work
-        with jax.jit optimizations.
-        """
-        children = [self._c_params, self._q_params]
-        aux_data = {
-            'model': self._model,
-            'learning_rate': self._learning_rate,
-            'batch_size': self._batch_size,
-            'epochs_num': self._epochs_num,
-            'loss_fn': self._loss_fun
-        }
-        return children, aux_data
-
-    @classmethod
-    def _tree_unflatten(cls, aux_data, children):
-        """
-       Reconstructs the class instance from JAX tree operations.
-       """
-        return cls(*children, **aux_data)
-
-    @classmethod
-    def register_pytree_node(cls):
-        """
-        Registers the JITOptimizer class as a JAX pytree node. This method allows JAX to
-        recognize JITOptimizer instances as pytrees, enabling automatic differentiation and
-        other JAX functionalities.
-        """
-        tree_util.register_pytree_node(
-            nodetype=cls,
-            flatten_func=cls._tree_flatten,
-            unflatten_func=cls._tree_unflatten
-        )
 
     def _batch_generator(
             self,
@@ -204,6 +191,7 @@ class Optimizer:
         return NotImplementedError("Subclasses must implement this method.")
 
 
+@register_pytree_node_class
 class QuantumOptimizer(Optimizer):
     """
     Quantum Optimizer that extends from a base Optimizer class. This optimizer is specifically designed
@@ -451,6 +439,7 @@ class QuantumOptimizer(Optimizer):
                 print(message)
 
 
+@register_pytree_node_class
 class HybridOptimizer(Optimizer):
     """
     Quantum Optimizer that extends from a base Optimizer class. This optimizer is specifically designed

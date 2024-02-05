@@ -52,7 +52,6 @@ class HybridEstimator:
         self._q_model = q_model
 
         self._optimizer = HybridOptimizer
-        self._optimizer.register_pytree_node()
 
         self._inp_rng, self._init_rng = jax.random.split(
             jax.random.PRNGKey(seed=42), num=2)

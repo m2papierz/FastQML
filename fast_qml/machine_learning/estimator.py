@@ -64,7 +64,6 @@ class QuantumEstimator:
         self._device = qml.device(
             name="default.qubit.jax", wires=self._n_qubits)
         self._optimizer = QuantumOptimizer
-        self._optimizer.register_pytree_node()
 
         self.weights = self._initialize_weights()
 
