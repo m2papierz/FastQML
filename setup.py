@@ -13,7 +13,8 @@ setup(
         'numpy',
         'pennylane',
         'jax',
-        'optax'
+        'optax',
+        'flax'
     ],
     url='https://github.com/m2papierz/FastQML',
     license='GNU General Public License v3.0'
