@@ -17,8 +17,8 @@ of handling both batch and non-batch training scenarios.
 
 Classes:
     - Optimizer: Base class for quantum model optimizers.
-    - DefaultOptimizer: Standard optimizer using the Adam algorithm from Pennylane.
-    - JITOptimizer: Optimizer utilizing JAX for JIT compilation, enhancing performance on CPU.
+    - QuantumOptimizer: Optimizer designed to work with quantum-only models.
+    - HybridOptimizer: Optimizer designed to work with quantum-classical models.
 """
 
 from abc import abstractmethod
@@ -187,7 +187,7 @@ class Optimizer:
             x_val: jnp.ndarray,
             y_val: jnp.ndarray,
             verbose: bool
-    ) -> None:
+    ):
         """
         Abstract method for the optimization loop.
 
@@ -201,7 +201,7 @@ class Optimizer:
             y_val: Validation target data.
             verbose: Flag to control verbosity.
         """
-        pass
+        return NotImplementedError("Subclasses must implement this method.")
 
 
 class QuantumOptimizer(Optimizer):
