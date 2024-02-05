@@ -25,8 +25,10 @@ Classes:
 import warnings
 from typing import Callable, Union, Tuple
 
+import jax
 import numpy as np
 import pennylane as qml
+from jax import numpy as jnp
 
 from fast_qml.quantum_circuits.feature_maps import FeatureMap, AmplitudeEmbedding
 from fast_qml.quantum_circuits.variational_forms import VariationalForm
@@ -84,19 +86,19 @@ class QNN(QuantumEstimator):
             measurements_num=measurements_num
         )
 
-    def _initialize_weights(self) -> np.ndarray:
+    def _initialize_weights(self) -> jnp.ndarray:
         """
         Initialize weights for the quantum circuit.
         """
-        shape = (self._layers_num, self._ansatz.params_num)
-        weights = 0.1 * qml.numpy.random.random(
-            shape, requires_grad=True)
+        key = jax.random.PRNGKey(42)
+        weights = 0.1 * jax.random.normal(
+            key, shape=(self._layers_num, self._ansatz.params_num))
         return weights
 
     def _quantum_layer(
             self,
-            weights: np.ndarray,
-            x_data: np.ndarray
+            weights: jnp.ndarray,
+            x_data: jnp.ndarray
     ) -> None:
         """
         Applies the quantum layer, which includes the feature map and the ansatz, to the circuit.
@@ -114,10 +116,10 @@ class QNN(QuantumEstimator):
             self._feature_map.apply(features=x_data)
             self._ansatz.apply(params=weights)
 
-    def _q_model(
+    def q_model(
             self,
-            weights: np.ndarray,
-            x_data: np.ndarray
+            weights: jnp.ndarray,
+            x_data: jnp.ndarray
     ) -> qml.qnode:
         """
         Defines the quantum model circuit for the neural network.
@@ -132,7 +134,8 @@ class QNN(QuantumEstimator):
         Returns:
             A PennyLane QNode representing the quantum circuit.
         """
-        @qml.qnode(device=self._device, interface=self._interface)
+        @jax.jit
+        @qml.qnode(device=self._device, interface="jax")
         def _circuit():
             if not self._data_reuploading:
                 self._feature_map.apply(features=x_data)
@@ -166,7 +169,7 @@ class QNN(QuantumEstimator):
                     weights=params[i], x_data=inputs)
 
         aux_input = np.array([aux_input])
-        print(qml.draw(draw_circuit)(self._weights, aux_input))
+        print(qml.draw(draw_circuit)(self.weights, aux_input))
 
 
 class QNNRegressor(QNN):
@@ -203,17 +206,15 @@ class QNNRegressor(QNN):
 
     def predict(
             self,
-            x: np.ndarray
-    ) -> np.ndarray:
+            x: jnp.ndarray
+    ) -> jnp.ndarray:
         """
         Returns the predictions (model outputs) for the given input data.
 
         Args:
             x: An array of input data.
         """
-        return np.array(
-            [self._q_model(weights=self._weights, x_data=_x) for _x in x]
-        ).ravel()
+        return jnp.array(self.q_model(weights=self.weights, x_data=x)).ravel()
 
 
 class QNNClassifier(QNN):
@@ -225,7 +226,7 @@ class QNNClassifier(QNN):
     This class is ideal for tasks where the goal is to categorize inputs into discrete classes.
 
     Args:
-        classes_num (int): Number of classes for the classification task.
+        classes_num: Number of classes for the classification task.
     """
 
     _allowed_losses = [MSELoss, HuberLoss, LogCoshLoss, BinaryCrossEntropyLoss]
@@ -242,7 +243,7 @@ class QNNClassifier(QNN):
             data_reuploading: bool = False
     ):
         self._validate_loss_fn(loss_fn)
-        self._classes_num = classes_num
+        self.classes_num = classes_num
 
         loss_fn, measurements_num = self._set_loss_function(
             classes_num=classes_num, loss_fn=loss_fn)
@@ -258,7 +259,7 @@ class QNNClassifier(QNN):
             data_reuploading=data_reuploading
         )
 
-        self._classes_num = classes_num
+        self.classes_num = classes_num
 
     def _validate_loss_fn(
             self,
@@ -293,10 +294,10 @@ class QNNClassifier(QNN):
 
     def predict_proba(
             self,
-            x: np.ndarray
-    ) -> np.ndarray:
+            x: jnp.ndarray
+    ) -> jnp.ndarray:
         """
-        Predict the probability of each class for the given input data.nThe output probabilities
+        Predict the probability of each class for the given input data. The output probabilities
         indicate the likelihood of each class for each sample.
 
         Args:
@@ -307,17 +308,17 @@ class QNNClassifier(QNN):
             a single probability for each sample. For multi-class classification, this will be a 2D array
             where each row corresponds to a sample and each column corresponds to a class.
         """
-        probabilities = [
-            self._q_model(self._weights, np.array([sample]))
-            for sample in x
-        ]
-        return np.array(probabilities)
+        output = jnp.array(self.q_model(self.weights, x))
+        if self.classes_num == 2:
+            return output.ravel()
+        else:
+            return output.T
 
     def predict(
             self,
-            x: np.ndarray,
+            x: jnp.ndarray,
             threshold: float = 0.5
-    ) -> np.ndarray:
+    ) -> jnp.ndarray:
         """
         Predict class labels for the given input data.
 
@@ -336,7 +337,7 @@ class QNNClassifier(QNN):
         """
         predictions = self.predict_proba(x)
 
-        if self._classes_num == 2:
-            return np.where(predictions >= threshold, 1, 0)
+        if self.classes_num == 2:
+            return jnp.where(predictions >= threshold, 1, 0)
         else:
-            return np.argmax(predictions, axis=1)
+            return jnp.argmax(predictions, axis=1)

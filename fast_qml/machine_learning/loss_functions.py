@@ -30,11 +30,8 @@ Example:
     >>> print("LogCosh Loss:", loss)
 """
 
-import importlib
 from abc import abstractmethod
-
-import numpy as np
-from fast_qml import device_manager, QubitDevice
+from jax import numpy as jnp
 
 
 class LossFunction:
@@ -43,9 +40,6 @@ class LossFunction:
     compatible with different numpy modules based on the quantum device being used. It automatically
     selects the appropriate numpy module depending on the device configuration.
 
-    Attributes:
-        _np_module: The numpy module appropriate for the current quantum device.
-                    This module is used for all numerical operations within the loss function.
 
     Raises:
         NotImplementedError: If the class is instantiated with an unsupported quantum device configuration.
@@ -54,28 +48,11 @@ class LossFunction:
         To use this class, one should subclass it and implement the `_loss_fn` method with the specific
         loss function logic. The subclass can then be instantiated and used directly.
     """
-    def __init__(self):
-        self._np_module = self._get_numpy_module()
-
-    @staticmethod
-    def _get_numpy_module():
-        """
-        Determines the appropriate numpy module to use based on the quantum device configuration.
-        This method checks the current configuration set in fast_qml.DEVICE and returns
-        the corresponding.
-        """
-        if device_manager.device == QubitDevice.CPU.value:
-            return importlib.import_module('pennylane.numpy')
-        elif device_manager.device == QubitDevice.CPU_JAX.value:
-            return importlib.import_module('jax.numpy')
-        else:
-            NotImplementedError()
-
     @abstractmethod
     def _loss_fn(
             self,
-            y_real: np.ndarray,
-            y_pred: np.ndarray
+            y_real: jnp.ndarray,
+            y_pred: jnp.ndarray
     ) -> float:
         """
         Abstract method for computing the loss. This method must be implemented by subclasses.
@@ -95,8 +72,8 @@ class LossFunction:
 
     def __call__(
             self,
-            y_real: np.ndarray,
-            y_pred: np.ndarray
+            y_real: jnp.ndarray,
+            y_pred: jnp.ndarray
     ) -> float:
         """
         Enables the LossFunction object to be called as a function. This method provides a convenient
@@ -123,9 +100,9 @@ class MSELoss(LossFunction):
 
     def _loss_fn(
             self,
-            y_real: np.ndarray,
-            y_pred: np.ndarray
-    ) -> float:
+            y_real: jnp.ndarray,
+            y_pred: jnp.ndarray
+    ) -> jnp.ndarray:
         """
         Calculate the Mean Squared Error loss.
 
@@ -136,8 +113,7 @@ class MSELoss(LossFunction):
         Returns:
             The computed MSE loss.
         """
-        loss = self._np_module.sum((y_real - y_pred) ** 2) / len(y_real)
-        return loss
+        return jnp.mean((y_real - y_pred) ** 2)
 
 
 class HuberLoss(LossFunction):
@@ -152,9 +128,9 @@ class HuberLoss(LossFunction):
 
     def _loss_fn(
             self,
-            y_real: np.ndarray,
-            y_pred: np.ndarray
-    ) -> float:
+            y_real: jnp.ndarray,
+            y_pred: jnp.ndarray
+    ) -> jnp.ndarray:
         """
         Calculate the Huber loss.
 
@@ -166,11 +142,11 @@ class HuberLoss(LossFunction):
             float: The computed Huber loss.
         """
         error = y_real - y_pred
-        huber_loss = self._np_module.where(
-            self._np_module.abs(error) < self.delta, 0.5 * error ** 2,
-            self.delta * (self._np_module.abs(error) - 0.5 * self.delta)
+        huber_loss = jnp.where(
+            jnp.abs(error) < self.delta, 0.5 * error ** 2,
+            self.delta * (jnp.abs(error) - 0.5 * self.delta)
         )
-        loss = self._np_module.mean(huber_loss)
+        loss = jnp.mean(huber_loss)
         return loss
 
 
@@ -187,9 +163,9 @@ class LogCoshLoss(LossFunction):
 
     def _loss_fn(
             self,
-            y_real: np.ndarray,
-            y_pred: np.ndarray
-    ) -> float:
+            y_real: jnp.ndarray,
+            y_pred: jnp.ndarray
+    ) -> jnp.ndarray:
         """
         Calculate the Log-Cosh loss.
 
@@ -200,8 +176,8 @@ class LogCoshLoss(LossFunction):
         Returns:
             The computed Log-Cosh loss.
         """
-        log_cosh_loss = self._np_module.log(self._np_module.cosh(y_real - y_pred))
-        loss = self._np_module.mean(log_cosh_loss)
+        log_cosh_loss = jnp.log(jnp.cosh(y_real - y_pred))
+        loss = jnp.mean(log_cosh_loss)
         return loss
 
 
@@ -220,12 +196,12 @@ class BinaryCrossEntropyLoss(LossFunction):
 
     def _loss_fn(
             self,
-            y_real: np.ndarray,
-            y_pred: np.ndarray
+            y_real: jnp.ndarray,
+            y_pred: jnp.ndarray
     ) -> float:
-        y_pred = self._np_module.clip(y_pred, self._eps, 1 - self._eps)
-        loss = -self._np_module.mean(
-            y_real * self._np_module.log(y_pred) + (1 - y_real) * self._np_module.log(1 - y_pred)
+        y_pred = jnp.clip(y_pred, self._eps, 1 - self._eps)
+        loss = -jnp.mean(
+            y_real * jnp.log(y_pred) + (1 - y_real) * jnp.log(1 - y_pred)
         )
         return loss
 
@@ -241,26 +217,28 @@ class CrossEntropyLoss(LossFunction):
         super().__init__()
         self._eps = eps
 
-    def _one_hot_encode(self, y_real, k):
+    @staticmethod
+    def _one_hot_encode(y_real, k):
         """
         Creates a one-hot encoding of x of size k
         """
-        return self._np_module.array(y_real[:, None] == self._np_module.arange(k))
+        return jnp.array(y_real[:, None] == jnp.arange(k))
 
-    def _is_one_hot(self, y_real):
+    @staticmethod
+    def _is_one_hot(y_real):
         """
         Checks if y is one-hot encoded
         """
         return (
                 y_real.ndim == 2 and
-                self._np_module.all(self._np_module.sum(y_real, axis=1) == 1) and
-                self._np_module.all((y_real == 0) | (y_real == 1))
+                jnp.all(jnp.sum(y_real, axis=1) == 1) and
+                jnp.all((y_real == 0) | (y_real == 1))
         )
 
     def _loss_fn(
             self,
-            y_real: np.ndarray,
-            y_pred: np.ndarray
+            y_real: jnp.ndarray,
+            y_pred: jnp.ndarray
     ) -> float:
         if y_pred.shape[0] != len(y_real):
             y_pred = y_pred.transpose()
@@ -268,7 +246,7 @@ class CrossEntropyLoss(LossFunction):
         if not self._is_one_hot(y_real):
             y_real = self._one_hot_encode(y_real, y_pred.shape[-1])
 
-        y_pred = self._np_module.clip(y_pred, self._eps, 1 - self._eps)
-        loss = -self._np_module.sum(y_real * self._np_module.log(y_pred))
+        y_pred = jnp.clip(y_pred, self._eps, 1 - self._eps)
+        loss = -jnp.sum(y_real * jnp.log(y_pred))
         loss /= len(y_real)
         return loss

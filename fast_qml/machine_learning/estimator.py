@@ -13,11 +13,11 @@ from abc import abstractmethod
 
 import numpy as np
 import pennylane as qml
+from jax import numpy as jnp
 
-from fast_qml import device_manager, QubitDevice
 from fast_qml.quantum_circuits.feature_maps import FeatureMap
 from fast_qml.quantum_circuits.variational_forms import VariationalForm
-from fast_qml.machine_learning.optimizer import DefaultOptimizer, JITOptimizer
+from fast_qml.machine_learning.optimizer import QuantumOptimizer
 from fast_qml.machine_learning.loss_functions import MSELoss
 from fast_qml.machine_learning.callbacks import EarlyStopping
 
@@ -38,7 +38,6 @@ class QuantumEstimator:
         measurements_num: Number of wires on which to run measurements.
 
     Attributes:
-        _interface: The computational interface (e.g., 'auto', 'jax') used by the quantum device.
         _optimizer: The optimizer used for training the quantum circuit.
         _device: The quantum device on which the circuit will be executed.
     """
@@ -58,28 +57,16 @@ class QuantumEstimator:
         self._n_qubits = n_qubits
         self._feature_map = feature_map
         self._ansatz = ansatz
-        self._loss_fn = loss_fn
+        self.loss_fn = loss_fn
         self._measurement_op = measurement_op
         self._measurements_num = measurements_num
 
-        self._setup_device_and_optimizer()
-        self._weights = self._initialize_weights()
+        self._device = qml.device(
+            name="default.qubit.jax", wires=self._n_qubits)
+        self._optimizer = QuantumOptimizer
+        self._optimizer.register_pytree_node()
 
-    def _setup_device_and_optimizer(self):
-        """
-        Set up the quantum device and optimizer based on the current device configuration.
-        """
-        if device_manager.device == QubitDevice.CPU.value:
-            self._interface = 'auto'
-            self._optimizer = DefaultOptimizer
-            self._device = qml.device("default.qubit", wires=self._n_qubits)
-        elif device_manager.device == QubitDevice.CPU_JAX.value:
-            self._interface = 'jax'
-            self._optimizer = JITOptimizer
-            self._optimizer.register_pytree_node()
-            self._device = qml.device("default.qubit.jax", wires=self._n_qubits)
-        else:
-            raise NotImplementedError("The specified device is not supported.")
+        self.weights = self._initialize_weights()
 
     @staticmethod
     def _is_valid_measurement_op(measurement_op):
@@ -89,25 +76,14 @@ class QuantumEstimator:
         return isinstance(measurement_op(0), qml.operation.Operation)
 
     @abstractmethod
-    def _initialize_weights(self) -> np.ndarray:
+    def _initialize_weights(self) -> jnp.ndarray:
         """
         Initialize weights for the quantum circuit.
         """
         raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
-    def _quantum_layer(
-            self,
-            weights: np.ndarray,
-            x_data: np.ndarray
-    ) -> None:
-        """
-        Define and apply the quantum layer of the circuit.
-        """
-        raise NotImplementedError("Subclasses must implement this method.")
-
-    @abstractmethod
-    def _q_model(
+    def q_model(
             self,
             weights: np.ndarray,
             x_data: np.ndarray
@@ -116,13 +92,6 @@ class QuantumEstimator:
         Define and apply the quantum model for the variational estimator.
         """
         raise NotImplementedError("Subclasses must implement this method.")
-
-    @abstractmethod
-    def draw_circuit(self) -> None:
-        """
-        Abstract method for drawing the quantum circuit of the model.
-        """
-        pass
 
     def fit(
             self,
@@ -157,9 +126,10 @@ class QuantumEstimator:
         stop early if no improvement is seen in the validation loss for a specified number of epochs.
         """
         optimizer = self._optimizer(
-            params=self._weights,
-            q_node=self._q_model,
-            loss_fn=self._loss_fn,
+            c_params=None,
+            q_params=self.weights,
+            model=self.q_model,
+            loss_fn=self.loss_fn,
             batch_size=batch_size,
             epochs_num=num_epochs,
             learning_rate=learning_rate,
@@ -167,11 +137,11 @@ class QuantumEstimator:
         )
 
         optimizer.optimize(
-            x_train=x_train,
-            y_train=y_train,
-            x_val=x_val,
-            y_val=y_val,
+            x_train=jnp.array(x_train),
+            y_train=jnp.array(y_train),
+            x_val=jnp.array(x_val),
+            y_val=jnp.array(y_val),
             verbose=verbose
         )
 
-        self._weights = optimizer.weights
+        self.weights = optimizer.weights

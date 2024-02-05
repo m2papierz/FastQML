@@ -20,8 +20,11 @@ of loss functions suitable for various machine learning tasks.
 
 import warnings
 from typing import Callable, Union, Tuple
+
+import jax
 import numpy as np
 import pennylane as qml
+from jax import numpy as jnp
 
 from fast_qml.machine_learning.estimator import QuantumEstimator
 from fast_qml.quantum_circuits.feature_maps import FeatureMap, AmplitudeEmbedding
@@ -65,18 +68,18 @@ class VariationalQuantumEstimator(QuantumEstimator):
             measurements_num=measurements_num
         )
 
-    def _initialize_weights(self) -> np.ndarray:
+    def _initialize_weights(self) -> jnp.ndarray:
         """
         Initialize weights for the quantum circuit.
         """
-        weights = 0.1 * qml.numpy.random.random(
-            self._ansatz.params_num, requires_grad=True)
+        weights = 0.1 * jax.random.normal(
+            key=jax.random.PRNGKey(42), shape=[self._ansatz.params_num])
         return weights
 
     def _quantum_layer(
             self,
-            weights: np.ndarray,
-            x_data: np.ndarray
+            weights: jnp.ndarray,
+            x_data: jnp.ndarray
     ) -> None:
         """
         Applies the quantum layer consisting of the feature map and the variational form.
@@ -91,10 +94,10 @@ class VariationalQuantumEstimator(QuantumEstimator):
         self._feature_map.apply(features=x_data)
         self._ansatz.apply(params=weights)
 
-    def _q_model(
+    def q_model(
             self,
-            weights: np.ndarray,
-            x_data: np.ndarray
+            weights: jnp.ndarray,
+            x_data: jnp.ndarray
     ) -> qml.qnode:
         """
         Defines the quantum model circuit to be used in optimization.
@@ -109,7 +112,8 @@ class VariationalQuantumEstimator(QuantumEstimator):
         Returns:
             A PennyLane QNode that outputs the expectation values of the measurement operators.
         """
-        @qml.qnode(device=self._device, interface=self._interface)
+        @jax.jit
+        @qml.qnode(device=self._device, interface='jax')
         def _circuit():
             self._quantum_layer(
                 weights=weights, x_data=x_data)
@@ -133,7 +137,7 @@ class VariationalQuantumEstimator(QuantumEstimator):
             self._quantum_layer(params, inputs)
 
         aux_input = np.array([aux_input])
-        print(qml.draw(draw_circuit)(self._weights, aux_input))
+        print(qml.draw(draw_circuit)(self.weights, aux_input))
 
 
 class VQRegressor(VariationalQuantumEstimator):
@@ -168,16 +172,16 @@ class VQRegressor(VariationalQuantumEstimator):
 
     def predict(
             self,
-            x: np.ndarray
-    ) -> np.ndarray:
+            x: jnp.ndarray
+    ) -> jnp.ndarray:
         """
         Returns the predictions (model outputs) for the given input data.
 
         Args:
             x: An array of input data.
         """
-        return np.array(
-            [self._q_model(weights=self._weights, x_data=_x) for _x in x]
+        return jnp.array(
+            self.q_model(weights=self.weights, x_data=x)
         ).ravel()
 
 
@@ -205,7 +209,7 @@ class VQClassifier(VariationalQuantumEstimator):
             measurement_op: Callable = qml.PauliZ
     ):
         self._validate_loss_fn(loss_fn)
-        self._classes_num = classes_num
+        self.classes_num = classes_num
 
         loss_fn, measurements_num = self._set_loss_function(
             classes_num=classes_num, loss_fn=loss_fn)
@@ -226,13 +230,14 @@ class VQClassifier(VariationalQuantumEstimator):
         """
         Validates the provided loss function.
         """
-        if loss_fn is not None and not any(isinstance(loss_fn, loss) for loss in self._allowed_losses):
+        is_instance = any(isinstance(loss_fn, lf) for lf in self._allowed_losses)
+        if loss_fn is not None and not is_instance:
             raise AttributeError("Invalid loss function.")
 
     @staticmethod
     def _set_loss_function(
-            classes_num,
-            loss_fn
+            classes_num: int,
+            loss_fn: Callable
     ) -> Union[Tuple[Callable, int]]:
         """
         Selects the appropriate loss function based on the number of classes.
@@ -252,10 +257,10 @@ class VQClassifier(VariationalQuantumEstimator):
 
     def predict_proba(
             self,
-            x: np.ndarray
-    ) -> np.ndarray:
+            x: jnp.ndarray
+    ) -> jnp.ndarray:
         """
-        Predict the probability of each class for the given input data.nThe output probabilities
+        Predict the probability of each class for the given input data. The output probabilities
         indicate the likelihood of each class for each sample.
 
         Args:
@@ -266,17 +271,17 @@ class VQClassifier(VariationalQuantumEstimator):
             a single probability for each sample. For multi-class classification, this will be a 2D array
             where each row corresponds to a sample and each column corresponds to a class.
         """
-        probabilities = [
-            self._q_model(self._weights, np.array([sample]))
-            for sample in x
-        ]
-        return np.array(probabilities).ravel()
+        output = jnp.array(self.q_model(self.weights, x))
+        if self.classes_num == 2:
+            return output.ravel()
+        else:
+            return output.T
 
     def predict(
             self,
-            x: np.ndarray,
+            x: jnp.ndarray,
             threshold: float = 0.5
-    ) -> np.ndarray:
+    ) -> jnp.ndarray:
         """
         Predict class labels for the given input data.
 
@@ -295,7 +300,7 @@ class VQClassifier(VariationalQuantumEstimator):
         """
         predictions = self.predict_proba(x)
 
-        if self._classes_num == 2:
-            return np.where(predictions >= threshold, 1, 0)
+        if self.classes_num == 2:
+            return jnp.where(predictions >= threshold, 1, 0)
         else:
-            return np.argmax(predictions, axis=1)
+            return jnp.argmax(predictions, axis=1)
