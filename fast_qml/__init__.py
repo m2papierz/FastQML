@@ -1,5 +1,8 @@
-from .device_manager import DeviceManager, QubitDevice
+try:
+    from jax import config as j_cfg
+except ImportError:
+    raise ImportError(
+        "JAX is not installed. Please install JAX before using FastQML."
+    )
 
-device_manager = DeviceManager()
-
-__all__ = ['device_manager', 'QubitDevice']
+j_cfg.update("jax_enable_x64", True)
