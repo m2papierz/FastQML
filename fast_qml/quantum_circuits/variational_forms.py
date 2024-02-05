@@ -18,7 +18,7 @@ from typing import Any, Union, Callable
 import pennylane as qml
 from jax import numpy as jnp
 
-from fast_qml.utils import validate_function_args
+from fast_qml.quantum_circuits.utils import validate_function_args
 from fast_qml.quantum_circuits.entanglement import Entangler
 
 
