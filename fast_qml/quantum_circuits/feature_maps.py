@@ -16,8 +16,8 @@ from abc import abstractmethod
 from itertools import combinations
 from typing import Union, Callable
 
-import numpy as np
 import pennylane as qml
+from jax import numpy as jnp
 
 from fast_qml.utils import validate_function_args
 
@@ -57,7 +57,7 @@ class FeatureMap:
     @abstractmethod
     def _set_map_func(
             self,
-            features: np.ndarray
+            features: jnp.ndarray
     ) -> None:
         """
         Abstract method to set the custom mapping function.
@@ -69,7 +69,7 @@ class FeatureMap:
 
     def apply(
             self,
-            features: np.ndarray
+            features: jnp.ndarray
     ) -> None:
         """
         Applies the feature map to the given classical features.
@@ -99,7 +99,7 @@ class AngleEmbedding(FeatureMap):
 
     def _set_map_func(
             self,
-            features: np.ndarray
+            features: jnp.ndarray
     ) -> None:
         """
         Sets the mapping function for AngleEmbedding.
@@ -129,7 +129,7 @@ class AmplitudeEmbedding(FeatureMap):
 
     def _set_map_func(
             self,
-            features: np.ndarray
+            features: jnp.ndarray
     ) -> None:
         """
         Sets the mapping function for AmplitudeEmbedding.
@@ -156,7 +156,7 @@ class IQPEmbedding(FeatureMap):
 
     def _set_map_func(
             self,
-            features: np.ndarray
+            features: jnp.ndarray
     ) -> None:
         """
         Sets the mapping function for IQPEmbedding.
@@ -181,7 +181,7 @@ class ZZFeatureMap(FeatureMap):
 
     def _verify_data_dims(
             self,
-            features: np.ndarray
+            features: jnp.ndarray
     ) -> None:
         """
         Verifies the dimensions of the input features.
@@ -200,7 +200,7 @@ class ZZFeatureMap(FeatureMap):
 
     def _set_map_func(
             self,
-            features: np.ndarray
+            features: jnp.ndarray
     ) -> None:
         """
         Sets the mapping function for ZZFeatureMap.
@@ -219,7 +219,7 @@ class ZZFeatureMap(FeatureMap):
             for q0, q1 in list(combinations(range(n_load), 2)):
                 qml.CZ(wires=[q0, q1])
                 qml.RZ(
-                    2.0 * (np.pi - features[:, q0]) * (np.pi - features[:, q1]),
+                    2.0 * (jnp.pi - features[:, q0]) * (jnp.pi - features[:, q1]),
                     wires=[q1]
                 )
                 qml.CZ(wires=[q0, q1])

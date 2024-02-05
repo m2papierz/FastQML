@@ -15,8 +15,8 @@ Module providing variational forms.
 from abc import abstractmethod
 from typing import Any, Union, Callable
 
-import numpy as np
 import pennylane as qml
+from jax import numpy as jnp
 
 from fast_qml.utils import validate_function_args
 from fast_qml.quantum_circuits.entanglement import Entangler
@@ -78,7 +78,7 @@ class VariationalForm:
     @abstractmethod
     def _variational_func(
             self,
-            params: np.ndarray
+            params: jnp.ndarray
     ) -> None:
         """
         Abstract method for the variational form function.
@@ -88,7 +88,7 @@ class VariationalForm:
     @abstractmethod
     def apply(
             self,
-            params: np.ndarray
+            params: jnp.ndarray
     ) -> None:
         """
         Abstract method to apply the variational form to the quantum circuit.
@@ -193,7 +193,7 @@ class Ansatz(VariationalForm):
         return (self._reps + add_rep) * self._parameters_num
 
     def _apply_rotation_layer(
-            self, params: np.ndarray
+            self, params: jnp.ndarray
     ) -> None:
         """
         Applies the user-defined rotation layer to the quantum circuit.
@@ -205,7 +205,7 @@ class Ansatz(VariationalForm):
 
     def _variational_func(
             self,
-            params: np.ndarray
+            params: jnp.ndarray
     ) -> None:
         """
         Defines and applies the variational form of the quantum circuit.
@@ -219,7 +219,7 @@ class Ansatz(VariationalForm):
 
     def apply(
             self,
-            params: np.ndarray
+            params: jnp.ndarray
     ) -> None:
         """
         Applies the variational ansatz to the quantum circuit.
@@ -324,7 +324,7 @@ class TwoLocal(VariationalForm):
         return (self._reps + add_rep) * self._n_qubits * rot_block_n
 
     def _apply_rotation_layer(
-            self, params: np.ndarray
+            self, params: jnp.ndarray
     ) -> None:
         """
         Applies rotation layer to the quantum circuit.
@@ -338,7 +338,7 @@ class TwoLocal(VariationalForm):
 
     def _variational_func(
             self,
-            params: np.ndarray
+            params: jnp.ndarray
     ) -> None:
         """
         Defines and applies the variational form of the quantum circuit.
@@ -352,7 +352,7 @@ class TwoLocal(VariationalForm):
 
     def apply(
             self,
-            params: np.ndarray
+            params: jnp.ndarray
     ) -> None:
         """
         Applies the variational ansatz to the quantum circuit.
@@ -489,7 +489,7 @@ class TreeTensor(VariationalForm):
                 "to be a power of two."
             )
 
-        self._layers = int(np.log2(n_qubits))
+        self._layers = int(jnp.log2(n_qubits))
 
         super().__init__(
             n_qubits=n_qubits,
@@ -505,7 +505,7 @@ class TreeTensor(VariationalForm):
 
     def _variational_func(
             self,
-            params: np.ndarray
+            params: jnp.ndarray
     ) -> None:
         """
         Defines and applies the variational form of the quantum circuit.
@@ -530,7 +530,7 @@ class TreeTensor(VariationalForm):
 
     def apply(
             self,
-            params: np.ndarray
+            params: jnp.ndarray
     ) -> None:
         """
         Applies the variational ansatz to the quantum circuit.
