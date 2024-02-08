@@ -8,18 +8,22 @@
 #
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
-from typing import Callable
 from abc import abstractmethod
+from typing import (
+    Callable, Union, Any, Tuple, Dict, Mapping)
 
+import jax
+import flax.linen as nn
 import numpy as np
 import pennylane as qml
 from jax import numpy as jnp
 
 from fast_qml.quantum_circuits.feature_maps import FeatureMap
 from fast_qml.quantum_circuits.variational_forms import VariationalForm
-from fast_qml.machine_learning.optimizer import QuantumOptimizer
 from fast_qml.machine_learning.loss_functions import MSELoss
 from fast_qml.machine_learning.callbacks import EarlyStopping
+from fast_qml.machine_learning.optimizer import (
+    QuantumOptimizer, ClassicalOptimizer, HybridOptimizer)
 
 
 class QuantumEstimator:
@@ -144,3 +148,250 @@ class QuantumEstimator:
         )
 
         self.weights = optimizer.weights
+
+
+class ClassicalEstimator:
+    def __init__(
+            self,
+            input_shape: Union[int, Tuple[int]],
+            c_model: nn.Module,
+            loss_fn: Callable = MSELoss()
+    ):
+        self._c_model = c_model
+        self._optimizer = ClassicalOptimizer
+        self._loss_fn = loss_fn
+
+        self._inp_rng, self._init_rng = jax.random.split(
+            jax.random.PRNGKey(seed=42), num=2)
+        self._weights = self._initialize_weights(input_shape)
+
+    def _initialize_weights(
+            self,
+            input_shape: Union[int, Tuple[int]]
+    ) -> Dict[str, Any]:
+        """
+        Initializes weights for the classical and quantum models.
+
+        Args:
+            input_shape: The shape of the input data.
+
+        Returns:
+            A dictionary containing initialized weights for both classical and quantum models.
+        """
+        if not all(isinstance(dim, int) for dim in input_shape):
+            raise ValueError("input_shape must be a tuple or list of integers.")
+
+        c_inp = jax.random.normal(self._inp_rng, shape=(1, *input_shape))
+        c_weights = self._c_model.init(self._init_rng, c_inp, train=True)
+        return c_weights
+
+    def _model(
+            self,
+            weights: Dict[str, Mapping[str, jnp.ndarray]],
+            x_data: jnp.ndarray
+    ):
+        """
+        Defines the classical model inference.
+
+        Args:
+            weights: Weights of the classical model.
+            x_data: Input data for the model.
+
+        Returns:
+            The output of the hybrid model.
+        """
+
+        def _classical_model():
+            c_out = self._c_model.apply(weights, x_data)
+            return jax.numpy.array(c_out)
+
+        return _classical_model()
+
+    def fit(
+            self,
+            x_train: jnp.ndarray,
+            y_train: jnp.ndarray,
+            x_val: jnp.ndarray = None,
+            y_val: jnp.ndarray = None,
+            learning_rate: float = 0.01,
+            num_epochs: int = 500,
+            batch_size: int = None,
+            early_stopping: EarlyStopping = None,
+            verbose: bool = True
+    ) -> None:
+        """
+        Trains the hybrid classical-quantum model on the given data.
+
+        This method optimizes the weights of the hybrid model using the specified loss function
+        and optimizer. It updates the weights based on the training data over a number of epochs.
+
+        Args:
+            x_train: Input features for training.
+            y_train: Target outputs for training.
+            x_val: Input features for validation.
+            y_val: Target outputs for validation.
+            learning_rate: Learning rate for the optimizer.
+            num_epochs: Number of epochs to run the training.
+            batch_size: Size of batches for training. If None, the whole dataset is used in each iteration.
+            early_stopping: Instance of EarlyStopping to be used during training.
+            verbose : If True, prints verbose messages during training.
+
+        If early stopping is configured and validation data is provided, the training process will
+        stop early if no improvement is seen in the validation loss for a specified number of epochs.
+        """
+        optimizer = self._optimizer(
+            c_params=self._weights,
+            q_params=None,
+            model=self._model,
+            loss_fn=self._loss_fn,
+            batch_size=batch_size,
+            epochs_num=num_epochs,
+            learning_rate=learning_rate,
+            early_stopping=early_stopping
+        )
+
+        optimizer.optimize(
+            x_train=jnp.array(x_train),
+            y_train=jnp.array(y_train),
+            x_val=jnp.array(x_val),
+            y_val=jnp.array(y_val),
+            verbose=verbose
+        )
+
+        self._weights = optimizer.weights
+
+
+class HybridEstimator:
+    """
+    Base class for creating hybrid quantum-classical machine learning models.
+
+    This class combines classical neural network models with quantum neural networks or variational
+    quantum algorithms to form a hybrid model for regression or classification tasks.
+
+    Attributes:
+        _c_model: The classical neural network model.
+        _q_model: The quantum model, which can be either a quantum neural network or a variational quantum algorithm.
+        _optimizer: Optimizer for training the hybrid model.
+        _inp_rng: Random number generator key for input initialization.
+        _init_rng: Random number generator key for model initialization.
+        _weights: Initialized weights for both classical and quantum models.
+
+    Args:
+        input_shape: The shape of the input data.
+        c_model: The classical neural network model.
+        q_model: The quantum model.
+    """
+
+    def __init__(
+            self,
+            input_shape,
+            c_model,
+            q_model,
+    ):
+        self._c_model = c_model
+        self._q_model = q_model
+
+        self._optimizer = HybridOptimizer
+
+        self._inp_rng, self._init_rng = jax.random.split(
+            jax.random.PRNGKey(seed=42), num=2)
+        self._weights = self._initialize_weights(input_shape)
+
+    def _initialize_weights(
+            self,
+            input_shape: Union[int, Tuple[int]]
+    ) -> Dict[str, Any]:
+        """
+        Initializes weights for the classical and quantum models.
+
+        Args:
+            input_shape: The shape of the input data.
+
+        Returns:
+            A dictionary containing initialized weights for both classical and quantum models.
+        """
+        c_inp = jax.random.normal(self._inp_rng, shape=input_shape)
+        c_weights = self._c_model.init(self._init_rng, c_inp)
+        return {
+            'c_weights': c_weights,
+            'q_weights': self._q_model.weights
+        }
+
+    def _model(
+            self,
+            c_weights: Dict[str, Mapping[str, jnp.ndarray]],
+            q_weights: jnp.ndarray,
+            x_data: jnp.ndarray
+    ):
+        """
+        Defines the hybrid model by combining classical and quantum models.
+
+        Args:
+            c_weights: Weights of the classical model.
+            q_weights: Weights of the quantum model.
+            x_data: Input data for the model.
+
+        Returns:
+            The output of the hybrid model.
+        """
+
+        def _hybrid_model():
+            c_out = self._c_model.apply(c_weights, x_data)
+            c_out = jax.numpy.array(c_out)
+            q_out = self._q_model.q_model(weights=q_weights, x_data=c_out)
+            return q_out
+
+        return _hybrid_model()
+
+    def fit(
+            self,
+            x_train: jnp.ndarray,
+            y_train: jnp.ndarray,
+            x_val: jnp.ndarray = None,
+            y_val: jnp.ndarray = None,
+            learning_rate: float = 0.01,
+            num_epochs: int = 500,
+            batch_size: int = None,
+            early_stopping: EarlyStopping = None,
+            verbose: bool = True
+    ) -> None:
+        """
+        Trains the hybrid classical-quantum model on the given data.
+
+        This method optimizes the weights of the hybrid model using the specified loss function
+        and optimizer. It updates the weights based on the training data over a number of epochs.
+
+        Args:
+            x_train: Input features for training.
+            y_train: Target outputs for training.
+            x_val: Input features for validation.
+            y_val: Target outputs for validation.
+            learning_rate: Learning rate for the optimizer.
+            num_epochs: Number of epochs to run the training.
+            batch_size: Size of batches for training. If None, the whole dataset is used in each iteration.
+            early_stopping: Instance of EarlyStopping to be used during training.
+            verbose : If True, prints verbose messages during training.
+
+        If early stopping is configured and validation data is provided, the training process will
+        stop early if no improvement is seen in the validation loss for a specified number of epochs.
+        """
+        optimizer = self._optimizer(
+            c_params=self._weights['c_weights'],
+            q_params=self._weights['q_weights'],
+            model=self._model,
+            loss_fn=self._q_model.loss_fn,
+            batch_size=batch_size,
+            epochs_num=num_epochs,
+            learning_rate=learning_rate,
+            early_stopping=early_stopping
+        )
+
+        optimizer.optimize(
+            x_train=jnp.array(x_train),
+            y_train=jnp.array(y_train),
+            x_val=jnp.array(x_val),
+            y_val=jnp.array(y_val),
+            verbose=verbose
+        )
+
+        self._weights['c_weights'], self._weights['q_weights'] = optimizer.weights
