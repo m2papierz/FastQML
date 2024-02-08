@@ -21,9 +21,11 @@ from jax import numpy as jnp
 from fast_qml.quantum_circuits.feature_maps import FeatureMap
 from fast_qml.quantum_circuits.variational_forms import VariationalForm
 from fast_qml.machine_learning.loss_functions import MSELoss
-from fast_qml.machine_learning.callbacks import EarlyStopping
+from fast_qml.optimization.callbacks import EarlyStopping
 from fast_qml.machine_learning.optimizer import (
-    QuantumOptimizer, ClassicalOptimizer, HybridOptimizer)
+    ClassicalOptimizer, HybridOptimizer)
+
+from fast_qml.optimization.opt_quantum import QuantumOptimizer
 
 
 class QuantumEstimator:
@@ -131,19 +133,20 @@ class QuantumEstimator:
         optimizer = self._optimizer(
             c_params=None,
             q_params=self.weights,
+            batch_stats=None,
             model=self.q_model,
             loss_fn=self.loss_fn,
             batch_size=batch_size,
-            epochs_num=num_epochs,
             learning_rate=learning_rate,
             early_stopping=early_stopping
         )
 
         optimizer.optimize(
-            x_train=jnp.array(x_train),
-            y_train=jnp.array(y_train),
-            x_val=jnp.array(x_val),
-            y_val=jnp.array(y_val),
+            train_data=x_train,
+            train_targets=y_train,
+            val_data=x_val,
+            val_targets=y_val,
+            epochs_num=num_epochs,
             verbose=verbose
         )
 
