@@ -29,6 +29,7 @@ from typing import (
 import jax
 import optax
 import numpy as np
+import flax.linen as nn
 import pennylane as qml
 
 from jax.example_libraries.optimizers import OptimizerState
@@ -191,26 +192,7 @@ class Optimizer:
         return NotImplementedError("Subclasses must implement this method.")
 
 
-@register_pytree_node_class
-class QuantumOptimizer(Optimizer):
-    """
-    Quantum Optimizer that extends from a base Optimizer class. This optimizer is specifically designed
-    to optimize fully quantum models.
-
-    Class provides functionality for both batch and non-batch training - if batch_size is given
-    then batch training is started, otherwise non-batching training runs.
-
-    Args:
-        c_params: Parameters of the classical model.
-        q_params: Parameters of the quantum model.
-        model: Quantum node representing the quantum circuit.
-        loss_fn: Loss function for the optimization.
-        epochs_num: Number of epochs for the training.
-        learning_rate: Learning rate for the Adam optimizer.
-        batch_size: Size of batches for training. If None, batch processing is not used.
-        early_stopping: Instance of EarlyStopping to be used during training.
-        retrieve_best_weights: flag indicating if to use BestModelCheckpoint.
-    """
+class SingleModelOptimizer(Optimizer):
     def __init__(
             self,
             c_params: Union[jnp.ndarray, None],
@@ -304,6 +286,75 @@ class QuantumOptimizer(Optimizer):
             Loss value for the given data and targets.
         """
         return self._calculate_loss(params, data, targets)
+
+    @abstractmethod
+    def optimize(
+            self,
+            x_train: jnp.ndarray,
+            y_train: jnp.ndarray,
+            x_val: jnp.ndarray,
+            y_val: jnp.ndarray,
+            verbose: bool
+    ):
+        """
+        Abstract method for the optimization loop.
+
+        This method should be implemented by subclasses to define the specific
+        optimization algorithm.
+
+        Args:
+            x_train: Training input data for the model.
+            y_train: Training target data.
+            x_val: Validation input data.
+            y_val: Validation target data.
+            verbose: Flag to control verbosity.
+        """
+        return NotImplementedError("Subclasses must implement this method.")
+
+
+@register_pytree_node_class
+class QuantumOptimizer(SingleModelOptimizer):
+    """
+    Quantum Optimizer that extends from a base Optimizer class. This optimizer is specifically designed
+    to optimize fully quantum models.
+
+    Class provides functionality for both batch and non-batch training - if batch_size is given
+    then batch training is started, otherwise non-batching training runs.
+
+    Args:
+        c_params: Parameters of the classical model.
+        q_params: Parameters of the quantum model.
+        model: Quantum node representing the quantum circuit.
+        loss_fn: Loss function for the optimization.
+        epochs_num: Number of epochs for the training.
+        learning_rate: Learning rate for the Adam optimizer.
+        batch_size: Size of batches for training. If None, batch processing is not used.
+        early_stopping: Instance of EarlyStopping to be used during training.
+        retrieve_best_weights: flag indicating if to use BestModelCheckpoint.
+    """
+    def __init__(
+            self,
+            c_params: Union[jnp.ndarray, None],
+            q_params: Union[jnp.ndarray, None],
+            model: qml.qnode,
+            loss_fn: Callable,
+            epochs_num: int,
+            learning_rate: float,
+            batch_size: int = None,
+            early_stopping: EarlyStopping = None,
+            retrieve_best_weights: bool = True
+    ):
+        super().__init__(
+            c_params=c_params,
+            q_params=q_params,
+            model=model,
+            loss_fn=loss_fn,
+            batch_size=batch_size,
+            epochs_num=epochs_num,
+            learning_rate=learning_rate,
+            early_stopping=early_stopping,
+            retrieve_best_weights=retrieve_best_weights
+        )
 
     def _perform_training_epoch(
             self,
@@ -419,6 +470,167 @@ class QuantumOptimizer(Optimizer):
 
                 if self._best_model_checkpoint:
                     self._best_model_checkpoint.update(self._q_params, val_loss)
+
+                if verbose:
+                    message += f", val_loss: {val_loss:.5f}"
+
+                # Early stopping logic
+                if self._early_stopping:
+                    self._early_stopping(val_loss)
+                    if self._early_stopping.stop_training:
+                        if verbose:
+                            print(f"Stopping early at epoch {epoch}.")
+                        break
+
+            # Load best model parameters at the end of training
+            if self._best_model_checkpoint:
+                self._best_model_checkpoint.load_best_model(self)
+
+            if verbose:
+                print(message)
+
+
+@register_pytree_node_class
+class ClassicalOptimizer(SingleModelOptimizer):
+    def __init__(
+            self,
+
+            c_params: Union[jnp.ndarray, None],
+            q_params: Union[jnp.ndarray, None],
+            model: nn.Module,
+            loss_fn: Callable,
+            epochs_num: int,
+            learning_rate: float,
+            batch_size: int = None,
+            early_stopping: EarlyStopping = None,
+            retrieve_best_weights: bool = True
+    ):
+        super().__init__(
+            c_params=c_params,
+            q_params=q_params,
+            model=model,
+            loss_fn=loss_fn,
+            batch_size=batch_size,
+            epochs_num=epochs_num,
+            learning_rate=learning_rate,
+            early_stopping=early_stopping,
+            retrieve_best_weights=retrieve_best_weights
+        )
+
+    def _perform_training_epoch(
+            self,
+            x_train: jnp.ndarray,
+            y_train: jnp.ndarray,
+            opt_state: OptimizerState
+    ) -> Tuple[float, OptimizerState]:
+        """
+        Performs a single training epoch.
+
+        Args:
+            x_train: Training input data.
+            y_train: Training target data.
+            opt_state: Current state of the optimizer.
+
+        Returns:
+            Average training loss for the epoch.
+        """
+
+        if self._batch_size:
+            total_loss, num_batches = 0.0, 0
+
+            # Process each batch
+            for x_batch, y_batch in self._batch_generator(x_train, y_train):
+                # Update parameters and optimizer states, calculate batch loss
+                self._c_params, opt_state, batch_loss = self._update_step(
+                    self._c_params, opt_state, x_batch, y_batch)
+
+                # Accumulate total loss and count the batch
+                total_loss += batch_loss
+                num_batches += 1
+
+            # Calculate average loss if there are batches processed
+            average_loss = total_loss / num_batches if num_batches > 0 else 0
+        else:
+            # If batching is not used, perform a single update on the entire dataset
+            self._c_params, opt_state, average_loss = self._update_step(
+                self._c_params, opt_state, x_train, y_train)
+
+        return average_loss, opt_state
+
+    def _perform_validation_epoch(
+            self,
+            x_val: jnp.ndarray,
+            y_val: jnp.ndarray
+    ) -> float:
+        """
+        Performs a validation step.
+
+        Args:
+            x_val: Validation input data.
+            y_val: Validation target data.
+
+        Returns:
+            Average validation loss.
+        """
+        if self._batch_size:
+            total_loss, num_batches = 0.0, 0
+
+            # Process each batch
+            for x_batch, y_batch in self._batch_generator(x_val, y_val):
+                # Calculate batch loss
+                batch_loss = self._validation_step(self._c_params, x_batch, y_batch)
+
+                # Accumulate total loss and count the batch
+                total_loss += batch_loss
+                num_batches += 1
+
+            # Calculate average loss if there are batches processed
+            average_loss = total_loss / num_batches if num_batches > 0 else 0
+        else:
+            # If batching is not used, calculate loss on the entire dataset
+            average_loss = self._validation_step(self._c_params, x_val, y_val)
+        return average_loss
+
+    def optimize(
+            self,
+            x_train: jnp.ndarray,
+            y_train: jnp.ndarray,
+            x_val: jnp.ndarray = None,
+            y_val: jnp.ndarray = None,
+            verbose: bool = True
+    ) -> None:
+        """
+        Optimization loop with validation.
+
+        Args:
+            x_train: Training input data for the model.
+            y_train: Training target data.
+            x_val: Optional validation input data.
+            y_val: Optional validation target data.
+            verbose: Flag to control verbosity.
+
+        If early stopping is configured and validation data is provided, the training process will
+        stop early if no improvement is seen in the validation loss for a specified number of epochs.
+        """
+        self._validate_data(x_train, y_train, data_type='Training')
+        if x_val is not None and y_val is not None:
+            self._validate_data(x_val, y_val, data_type='Validation')
+
+        opt_state = self._opt.init(self._c_params)
+
+        message = ""
+        for epoch in range(self._epochs_num):
+            train_loss, opt_state = self._perform_training_epoch(
+                x_train=x_train, y_train=y_train, opt_state=opt_state)
+
+            if verbose:
+                message = f"Epoch {epoch + 1}/{self._epochs_num} - train_loss: {train_loss:.5f}"
+
+            if x_val is not None and y_val is not None:
+                val_loss = self._perform_validation_epoch(x_val=x_val, y_val=y_val)
+
+                if self._best_model_checkpoint:
+                    self._best_model_checkpoint.update(self._c_params, val_loss)
 
                 if verbose:
                     message += f", val_loss: {val_loss:.5f}"
