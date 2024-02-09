@@ -22,8 +22,7 @@ Classes:
 - QNNClassifier: Subclass for classification tasks using quantum neural networks.
 """
 
-import warnings
-from typing import Callable, Union, Tuple
+from typing import Callable
 
 import jax
 import numpy as np
@@ -33,9 +32,6 @@ from jax import numpy as jnp
 from fast_qml.quantum_circuits.feature_maps import FeatureMap, AmplitudeEmbedding
 from fast_qml.quantum_circuits.variational_forms import VariationalForm
 from fast_qml.machine_learning.estimator import QuantumEstimator
-from fast_qml.machine_learning.loss_functions import (
-    MSELoss, HuberLoss, LogCoshLoss, BinaryCrossEntropyLoss, CrossEntropyLoss
-)
 
 
 class QNN(QuantumEstimator):
@@ -62,9 +58,9 @@ class QNN(QuantumEstimator):
             n_qubits: int,
             feature_map: FeatureMap,
             ansatz: VariationalForm,
+            loss_fn: Callable,
             layers_num: int = 1,
             measurement_op: Callable = qml.PauliZ,
-            loss_fn: Callable = MSELoss(),
             measurements_num: int = 1,
             data_reuploading: bool = False
     ):
@@ -178,21 +174,16 @@ class QNNRegressor(QNN):
     and ensures the use of loss functions suitable for regression.
     """
 
-    _allowed_losses = [MSELoss, HuberLoss, LogCoshLoss]
-
     def __init__(
             self,
             n_qubits: int,
             feature_map: FeatureMap,
             ansatz: VariationalForm,
+            loss_fn: Callable,
             layers_num: int = 1,
             measurement_op: Callable = qml.PauliZ,
-            loss_fn: Callable = MSELoss(),
             data_reuploading: bool = False
     ):
-        if not any(isinstance(loss_fn, loss) for loss in self._allowed_losses):
-            raise AttributeError("Invalid loss function.")
-
         super().__init__(
             n_qubits=n_qubits,
             feature_map=feature_map,
@@ -214,7 +205,9 @@ class QNNRegressor(QNN):
         Args:
             x: An array of input data.
         """
-        return jnp.array(self.q_model(weights=self.weights, x_data=x)).ravel()
+        return jnp.array(
+            self.q_model(weights=self.weights, x_data=x)
+        ).ravel()
 
 
 class QNNClassifier(QNN):
@@ -229,24 +222,22 @@ class QNNClassifier(QNN):
         classes_num: Number of classes for the classification task.
     """
 
-    _allowed_losses = [MSELoss, HuberLoss, LogCoshLoss, BinaryCrossEntropyLoss]
-
     def __init__(
             self,
             n_qubits: int,
             feature_map: FeatureMap,
             ansatz: VariationalForm,
+            loss_fn: Callable,
             classes_num: int,
-            loss_fn: Callable = None,
             layers_num: int = 1,
             measurement_op: Callable = qml.PauliZ,
             data_reuploading: bool = False
     ):
-        self._validate_loss_fn(loss_fn)
+        if classes_num == 2:
+            measurements_num = 1
+        else:
+            measurements_num = classes_num
         self.classes_num = classes_num
-
-        loss_fn, measurements_num = self._set_loss_function(
-            classes_num=classes_num, loss_fn=loss_fn)
 
         super().__init__(
             n_qubits=n_qubits,
@@ -258,39 +249,6 @@ class QNNClassifier(QNN):
             measurements_num=measurements_num,
             data_reuploading=data_reuploading
         )
-
-        self.classes_num = classes_num
-
-    def _validate_loss_fn(
-            self,
-            loss_fn: Callable
-    ) -> None:
-        """
-        Validates the provided loss function.
-        """
-        if loss_fn is not None and not any(isinstance(loss_fn, loss) for loss in self._allowed_losses):
-            raise AttributeError("Invalid loss function.")
-
-    @staticmethod
-    def _set_loss_function(
-            classes_num,
-            loss_fn
-    ) -> Union[Tuple[Callable, int]]:
-        """
-        Selects the appropriate loss function based on the number of classes.
-        """
-        if classes_num == 2:
-            return BinaryCrossEntropyLoss(), 1
-        elif classes_num > 2:
-            if loss_fn is not None:
-                warnings.warn(
-                    "For multi-class classification (classes_num > 2), the provided "
-                    "loss_fn will be ignored, and CrossEntropyLoss will be used instead.",
-                    category=UserWarning
-                )
-            return CrossEntropyLoss(), classes_num
-        else:
-            raise ValueError("Classes must be 2 or more.")
 
     def predict_proba(
             self,
@@ -308,11 +266,11 @@ class QNNClassifier(QNN):
             a single probability for each sample. For multi-class classification, this will be a 2D array
             where each row corresponds to a sample and each column corresponds to a class.
         """
-        output = jnp.array(self.q_model(self.weights, x))
+        logits = jnp.array(self.q_model(self.weights, x))
         if self.classes_num == 2:
-            return output.ravel()
+            return logits.ravel()
         else:
-            return output.T
+            return logits.T
 
     def predict(
             self,
@@ -335,9 +293,9 @@ class QNNClassifier(QNN):
             binary labels (0 or 1). For multi-class classification, this will be a 1D array where each
             element is the predicted class index.
         """
-        predictions = self.predict_proba(x)
+        logits = self.predict_proba(x)
 
         if self.classes_num == 2:
-            return jnp.where(predictions >= threshold, 1, 0)
+            return jnp.where(logits >= threshold, 1, 0)
         else:
-            return jnp.argmax(predictions, axis=1)
+            return jnp.argmax(logits, axis=1)

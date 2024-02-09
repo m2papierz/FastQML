@@ -18,8 +18,7 @@ leveraging quantum feature maps and variational forms. They are capable of handl
 of loss functions suitable for various machine learning tasks.
 """
 
-import warnings
-from typing import Callable, Union, Tuple
+from typing import Callable
 
 import jax
 import numpy as np
@@ -29,9 +28,6 @@ from jax import numpy as jnp
 from fast_qml.machine_learning.estimator import QuantumEstimator
 from fast_qml.quantum_circuits.feature_maps import FeatureMap, AmplitudeEmbedding
 from fast_qml.quantum_circuits.variational_forms import VariationalForm
-from fast_qml.machine_learning.loss_functions import (
-    MSELoss, HuberLoss, LogCoshLoss, BinaryCrossEntropyLoss, CrossEntropyLoss
-)
 
 
 class VariationalQuantumEstimator(QuantumEstimator):
@@ -100,7 +96,7 @@ class VariationalQuantumEstimator(QuantumEstimator):
             x_data: jnp.ndarray
     ) -> qml.qnode:
         """
-        Defines the quantum model circuit to be used in optimization.
+        Defines the quantum model circuit to be used in core.
 
         This method creates a PennyLane QNode that represents the quantum circuit. It applies the quantum layer
         to the input data and then performs the specified measurements.
@@ -148,19 +144,14 @@ class VQRegressor(VariationalQuantumEstimator):
     This class is suitable for tasks where the goal is to predict continuous or quantitative outputs.
     """
 
-    _allowed_losses = [MSELoss, HuberLoss, LogCoshLoss]
-
     def __init__(
             self,
             n_qubits: int,
             feature_map: FeatureMap,
             ansatz: VariationalForm,
-            loss_fn: Callable = MSELoss(),
+            loss_fn: Callable,
             measurement_op: Callable = qml.PauliZ
     ):
-        if not any(isinstance(loss_fn, loss) for loss in self._allowed_losses):
-            raise AttributeError("Invalid loss function.")
-
         super().__init__(
             n_qubits=n_qubits,
             feature_map=feature_map,
@@ -196,23 +187,20 @@ class VQClassifier(VariationalQuantumEstimator):
     Args:
         classes_num: Number of classes in the classification problem.
     """
-
-    _allowed_losses = [MSELoss, HuberLoss, LogCoshLoss, BinaryCrossEntropyLoss]
-
     def __init__(
             self,
             n_qubits: int,
             feature_map: FeatureMap,
             ansatz: VariationalForm,
             classes_num: int,
-            loss_fn: Callable = None,
+            loss_fn: Callable,
             measurement_op: Callable = qml.PauliZ
     ):
-        self._validate_loss_fn(loss_fn)
+        if classes_num == 2:
+            measurements_num = 1
+        else:
+            measurements_num = classes_num
         self.classes_num = classes_num
-
-        loss_fn, measurements_num = self._set_loss_function(
-            classes_num=classes_num, loss_fn=loss_fn)
 
         super().__init__(
             n_qubits=n_qubits,
@@ -222,38 +210,6 @@ class VQClassifier(VariationalQuantumEstimator):
             measurement_op=measurement_op,
             measurements_num=measurements_num
         )
-
-    def _validate_loss_fn(
-            self,
-            loss_fn: Callable
-    ) -> None:
-        """
-        Validates the provided loss function.
-        """
-        is_instance = any(isinstance(loss_fn, lf) for lf in self._allowed_losses)
-        if loss_fn is not None and not is_instance:
-            raise AttributeError("Invalid loss function.")
-
-    @staticmethod
-    def _set_loss_function(
-            classes_num: int,
-            loss_fn: Callable
-    ) -> Union[Tuple[Callable, int]]:
-        """
-        Selects the appropriate loss function based on the number of classes.
-        """
-        if classes_num == 2:
-            return BinaryCrossEntropyLoss(), 1
-        elif classes_num > 2:
-            if loss_fn is not None:
-                warnings.warn(
-                    "For multi-class classification (classes_num > 2), the provided "
-                    "loss_fn will be ignored, and CrossEntropyLoss will be used instead.",
-                    category=UserWarning
-                )
-            return CrossEntropyLoss(), classes_num
-        else:
-            raise ValueError("Classes must be 2 or more.")
 
     def predict_proba(
             self,
@@ -271,11 +227,11 @@ class VQClassifier(VariationalQuantumEstimator):
             a single probability for each sample. For multi-class classification, this will be a 2D array
             where each row corresponds to a sample and each column corresponds to a class.
         """
-        output = jnp.array(self.q_model(self.weights, x))
+        logits = jnp.array(self.q_model(self.weights, x))
         if self.classes_num == 2:
-            return output.ravel()
+            return logits.ravel()
         else:
-            return output.T
+            return logits.T
 
     def predict(
             self,
@@ -298,9 +254,9 @@ class VQClassifier(VariationalQuantumEstimator):
             binary labels (0 or 1). For multi-class classification, this will be a 1D array where each
             element is the predicted class index.
         """
-        predictions = self.predict_proba(x)
+        logits = self.predict_proba(x)
 
         if self.classes_num == 2:
-            return jnp.where(predictions >= threshold, 1, 0)
+            return jnp.where(logits >= threshold, 1, 0)
         else:
-            return jnp.argmax(predictions, axis=1)
+            return jnp.argmax(logits, axis=1)
