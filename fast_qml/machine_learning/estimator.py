@@ -48,6 +48,7 @@ class QuantumEstimator:
             feature_map: FeatureMap,
             ansatz: VariationalForm,
             loss_fn: Callable,
+            optimizer: Callable,
             measurement_op: Callable = qml.PauliZ,
             measurements_num: int = 1
     ):
@@ -59,6 +60,7 @@ class QuantumEstimator:
         self._feature_map = feature_map
         self._ansatz = ansatz
         self.loss_fn = loss_fn
+        self._optimizer = optimizer
         self._measurement_op = measurement_op
         self._measurements_num = measurements_num
 
@@ -129,8 +131,8 @@ class QuantumEstimator:
             batch_stats=None,
             model=self.q_model,
             loss_fn=self.loss_fn,
+            optimizer=self._optimizer(learning_rate),
             batch_size=batch_size,
-            learning_rate=learning_rate,
             early_stopping=early_stopping
         )
 
@@ -152,10 +154,12 @@ class ClassicalEstimator:
             input_shape: Union[int, Tuple[int]],
             c_model: nn.Module,
             loss_fn: Callable,
+            optimizer: Callable,
             batch_norm: bool
     ):
         self._c_model = c_model
         self._loss_fn = loss_fn
+        self._optimizer = optimizer
         self._batch_norm = batch_norm
 
         self._inp_rng, self._init_rng = jax.random.split(
@@ -211,8 +215,8 @@ class ClassicalEstimator:
             batch_stats=batch_stats,
             model=self._model,
             loss_fn=self._loss_fn,
+            optimizer=self._optimizer(learning_rate),
             batch_size=batch_size,
-            learning_rate=learning_rate,
             early_stopping=early_stopping
         )
 
@@ -235,11 +239,13 @@ class HybridEstimator:
             c_model: nn.Module,
             q_model: QuantumEstimator,
             loss_fn: Callable,
+            optimizer: Callable,
             batch_norm: bool
     ):
         self._c_model = c_model
         self._q_model = q_model
         self._loss_fn = loss_fn
+        self._optimizer = optimizer
         self._batch_norm = batch_norm
 
         self._inp_rng, self._init_rng = jax.random.split(
@@ -298,8 +304,8 @@ class HybridEstimator:
             batch_stats=batch_stats,
             model=self._model,
             loss_fn=self._q_model.loss_fn,
+            optimizer=self._optimizer(learning_rate),
             batch_size=batch_size,
-            learning_rate=learning_rate,
             early_stopping=early_stopping
         )
 

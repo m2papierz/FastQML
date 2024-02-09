@@ -59,6 +59,7 @@ class QNN(QuantumEstimator):
             feature_map: FeatureMap,
             ansatz: VariationalForm,
             loss_fn: Callable,
+            optimizer: Callable,
             layers_num: int = 1,
             measurement_op: Callable = qml.PauliZ,
             measurements_num: int = 1,
@@ -78,6 +79,7 @@ class QNN(QuantumEstimator):
             feature_map=feature_map,
             ansatz=ansatz,
             loss_fn=loss_fn,
+            optimizer=optimizer,
             measurement_op=measurement_op,
             measurements_num=measurements_num
         )
@@ -180,6 +182,7 @@ class QNNRegressor(QNN):
             feature_map: FeatureMap,
             ansatz: VariationalForm,
             loss_fn: Callable,
+            optimizer: Callable,
             layers_num: int = 1,
             measurement_op: Callable = qml.PauliZ,
             data_reuploading: bool = False
@@ -191,6 +194,7 @@ class QNNRegressor(QNN):
             layers_num=layers_num,
             measurement_op=measurement_op,
             loss_fn=loss_fn,
+            optimizer=optimizer,
             measurements_num=1,
             data_reuploading=data_reuploading
         )
@@ -228,6 +232,7 @@ class QNNClassifier(QNN):
             feature_map: FeatureMap,
             ansatz: VariationalForm,
             loss_fn: Callable,
+            optimizer: Callable,
             classes_num: int,
             layers_num: int = 1,
             measurement_op: Callable = qml.PauliZ,
@@ -246,6 +251,7 @@ class QNNClassifier(QNN):
             layers_num=layers_num,
             measurement_op=measurement_op,
             loss_fn=loss_fn,
+            optimizer=optimizer,
             measurements_num=measurements_num,
             data_reuploading=data_reuploading
         )

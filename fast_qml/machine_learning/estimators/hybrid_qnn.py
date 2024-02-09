@@ -28,6 +28,7 @@ class HybridModel(HybridEstimator):
             c_model: nn.Module,
             q_model: Union[VQRegressor, VQClassifier, QNNRegressor, QNNClassifier],
             loss_fn: Callable,
+            optimizer: Callable,
             batch_norm: bool
     ):
         super().__init__(
@@ -35,6 +36,7 @@ class HybridModel(HybridEstimator):
             c_model=c_model,
             q_model=q_model,
             loss_fn=loss_fn,
+            optimizer=optimizer,
             batch_norm=batch_norm
         )
 
@@ -136,6 +138,7 @@ class HybridRegressor(HybridModel):
             c_model: nn.Module,
             q_model: Union[VQRegressor, QNNRegressor],
             loss_fn: Callable,
+            optimizer: Callable,
             batch_norm: bool
     ):
         super().__init__(
@@ -143,6 +146,7 @@ class HybridRegressor(HybridModel):
             c_model=c_model,
             q_model=q_model,
             loss_fn=loss_fn,
+            optimizer=optimizer,
             batch_norm=batch_norm
         )
 
@@ -177,6 +181,7 @@ class HybridClassifier(HybridModel):
             c_model: nn.Module,
             q_model: Union[VQClassifier, QNNClassifier],
             loss_fn: Callable,
+            optimizer: Callable,
             batch_norm: bool
     ):
         super().__init__(
@@ -184,6 +189,7 @@ class HybridClassifier(HybridModel):
             c_model=c_model,
             q_model=q_model,
             loss_fn=loss_fn,
+            optimizer=optimizer,
             batch_norm=batch_norm
         )
 

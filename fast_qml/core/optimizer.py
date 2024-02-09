@@ -40,7 +40,6 @@ class Optimizer:
         model: Quantum node representing the quantum circuit.
         loss_fn: Loss function used for core.
         batch_size: Batch size for training.
-        learning_rate: Learning rate.
         early_stopping: Instance of EarlyStopping to be used during training.
         retrieve_best_weights: Boolean flag indicating if to use BestModelCheckpoint.
     """
@@ -51,7 +50,7 @@ class Optimizer:
             batch_stats: Union[Dict[str, Mapping[str, jnp.ndarray]], None],
             model: [qml.qnode, Callable],
             loss_fn: Callable,
-            learning_rate: float,
+            optimizer: optax.GradientTransformation,
             batch_size: int,
             early_stopping: EarlyStopping = None,
             retrieve_best_weights: bool = True
@@ -61,7 +60,6 @@ class Optimizer:
         self._batch_stats = batch_stats
         self._model = model
         self._loss_fn = loss_fn
-        self._learning_rate = learning_rate
         self._batch_size = batch_size
 
         self._early_stopping = early_stopping
@@ -70,7 +68,7 @@ class Optimizer:
         if retrieve_best_weights:
             self._best_model_checkpoint = BestModelCheckpoint()
 
-        self._opt = optax.adam(learning_rate=learning_rate)
+        self._opt = optimizer
         self._train_loader, self._val_loader = None, None
 
     def tree_flatten(self):
@@ -83,7 +81,7 @@ class Optimizer:
         aux_data = {
             'model': self._model,
             'loss_fn': self._loss_fn,
-            'learning_rate': self._learning_rate,
+            'optimizer': self._opt,
             'batch_size': self._batch_size
         }
         return children, aux_data
@@ -214,7 +212,7 @@ class QuantumOptimizer(Optimizer):
             batch_stats: Union[jnp.ndarray, None],
             model: [qml.qnode, Callable],
             loss_fn: Callable,
-            learning_rate: float,
+            optimizer: optax.GradientTransformation,
             batch_size: int,
             early_stopping: EarlyStopping = None,
             retrieve_best_weights: bool = True
@@ -225,7 +223,7 @@ class QuantumOptimizer(Optimizer):
             batch_stats=batch_stats,
             model=model,
             loss_fn=loss_fn,
-            learning_rate=learning_rate,
+            optimizer=optimizer,
             batch_size=batch_size,
             early_stopping=early_stopping,
             retrieve_best_weights=retrieve_best_weights
@@ -412,7 +410,7 @@ class ClassicalOptimizer(Optimizer):
             batch_stats: Union[jnp.ndarray, None],
             model: [qml.qnode, Callable],
             loss_fn: Callable,
-            learning_rate: float,
+            optimizer: optax.GradientTransformation,
             batch_size: int,
             early_stopping: EarlyStopping = None,
             retrieve_best_weights: bool = True
@@ -423,7 +421,7 @@ class ClassicalOptimizer(Optimizer):
             batch_stats=batch_stats,
             model=model,
             loss_fn=loss_fn,
-            learning_rate=learning_rate,
+            optimizer=optimizer,
             batch_size=batch_size,
             early_stopping=early_stopping,
             retrieve_best_weights=retrieve_best_weights
@@ -624,7 +622,7 @@ class HybridOptimizer(Optimizer):
             batch_stats: Union[jnp.ndarray, None],
             model: [qml.qnode, Callable],
             loss_fn: Callable,
-            learning_rate: float,
+            optimizer: optax.GradientTransformation,
             batch_size: int,
             early_stopping: EarlyStopping = None,
             retrieve_best_weights: bool = True
@@ -635,14 +633,14 @@ class HybridOptimizer(Optimizer):
             batch_stats=batch_stats,
             model=model,
             loss_fn=loss_fn,
-            learning_rate=learning_rate,
+            optimizer=optimizer,
             batch_size=batch_size,
             early_stopping=early_stopping,
             retrieve_best_weights=retrieve_best_weights
         )
 
-        self._c_opt = optax.adam(learning_rate=learning_rate)
-        self._q_opt = optax.adam(learning_rate=learning_rate)
+        self._c_opt = optimizer
+        self._q_opt = optimizer
 
     def _calculate_loss(
             self,

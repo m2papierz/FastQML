@@ -53,6 +53,7 @@ class VariationalQuantumEstimator(QuantumEstimator):
             ansatz: VariationalForm,
             measurement_op: Callable,
             loss_fn: Callable,
+            optimizer: Callable,
             measurements_num: int
     ):
         super().__init__(
@@ -60,6 +61,7 @@ class VariationalQuantumEstimator(QuantumEstimator):
             feature_map=feature_map,
             ansatz=ansatz,
             loss_fn=loss_fn,
+            optimizer=optimizer,
             measurement_op=measurement_op,
             measurements_num=measurements_num
         )
@@ -150,6 +152,7 @@ class VQRegressor(VariationalQuantumEstimator):
             feature_map: FeatureMap,
             ansatz: VariationalForm,
             loss_fn: Callable,
+            optimizer: Callable,
             measurement_op: Callable = qml.PauliZ
     ):
         super().__init__(
@@ -157,6 +160,7 @@ class VQRegressor(VariationalQuantumEstimator):
             feature_map=feature_map,
             ansatz=ansatz,
             loss_fn=loss_fn,
+            optimizer=optimizer,
             measurement_op=measurement_op,
             measurements_num=1
         )
@@ -194,6 +198,7 @@ class VQClassifier(VariationalQuantumEstimator):
             ansatz: VariationalForm,
             num_classes: int,
             loss_fn: Callable,
+            optimizer: Callable,
             measurement_op: Callable = qml.PauliZ
     ):
         if num_classes == 2:
@@ -207,6 +212,7 @@ class VQClassifier(VariationalQuantumEstimator):
             feature_map=feature_map,
             ansatz=ansatz,
             loss_fn=loss_fn,
+            optimizer=optimizer,
             measurement_op=measurement_op,
             measurements_num=measurements_num
         )

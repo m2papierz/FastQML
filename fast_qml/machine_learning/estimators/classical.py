@@ -23,12 +23,14 @@ class ClassicalModel(ClassicalEstimator):
             input_shape: Union[int, Tuple[int]],
             c_model: nn.Module,
             loss_fn: Callable,
+            optimizer: Callable,
             batch_norm: bool
     ):
         super().__init__(
             input_shape=input_shape,
             c_model=c_model,
             loss_fn=loss_fn,
+            optimizer=optimizer,
             batch_norm=batch_norm
         )
 
@@ -90,7 +92,7 @@ class ClassicalModel(ClassicalEstimator):
                 else:
                     c_out = self._c_model.apply(
                         {'params': weights, 'batch_stats': batch_stats},
-                        x_data, train=training)
+                        x_data, train=training, mutable=False)
                     return jax.numpy.array(c_out)
             else:
                 c_out = self._c_model.apply({'params': weights}, x_data)
@@ -105,12 +107,14 @@ class ClassicalRegressor(ClassicalModel):
             input_shape: Union[int, Tuple[int]],
             c_model: nn.Module,
             loss_fn: Callable,
+            optimizer: Callable,
             batch_norm: bool
     ):
         super().__init__(
             input_shape=input_shape,
             c_model=c_model,
             loss_fn=loss_fn,
+            optimizer=optimizer,
             batch_norm=batch_norm
         )
 
@@ -143,6 +147,7 @@ class ClassicalClassifier(ClassicalModel):
             input_shape: Union[int, Tuple[int]],
             c_model: nn.Module,
             loss_fn: Callable,
+            optimizer: Callable,
             batch_norm: bool,
             num_classes: int
     ):
@@ -150,6 +155,7 @@ class ClassicalClassifier(ClassicalModel):
             input_shape=input_shape,
             c_model=c_model,
             loss_fn=loss_fn,
+            optimizer=optimizer,
             batch_norm=batch_norm
         )
 
