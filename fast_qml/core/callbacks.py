@@ -69,19 +69,22 @@ class EarlyStopping:
 
 class BestModelCheckpoint:
     """
-    A callback class for tracking and storing the best model parameters based on validation loss during training.
+    A callback class for tracking and storing the best model parameters based on validation loss during
+    the training loop.
 
-    This class is designed to be used with an optimizer during the training process. It keeps track of the best
-    model parameters when provided with the current model parameters and validation loss at each epoch.
+    This class is designed to be used with an optimizer during the training process. It keeps track of the
+    best model parameters when provided with the current model parameters and validation loss at each epoch.
 
     Attributes:
-        best_q_params: Stores the best quantum model parameters encountered during training.
-        best_c_params: Optionally stores the best classical model parameters if provided during training.
+        best_q_params: Stores the best quantum model parameters if provided during training.
+        best_c_params: Stores the best classical model parameters if provided during training.
+        best_batch_stats: Stores the best batch statistics if provided during training
         best_val_loss: Records the lowest validation loss encountered during training.
     """
     def __init__(self):
         self.best_q_params = None
         self.best_c_params = None
+        self.best_batch_stats = None
         self.best_val_loss = float('inf')
 
     def update(
@@ -89,20 +92,24 @@ class BestModelCheckpoint:
             current_val_loss: float,
             current_c_params: jnp.ndarray = None,
             current_q_params: jnp.ndarray = None,
+            current_batch_stats: jnp.ndarray = None
     ) -> None:
         """
         Updates the best model parameters if the current validation loss is lower.
 
         Args:
-            current_q_params: Current Q model parameters.
             current_val_loss: Current validation loss.
-            current_c_params: Optional current C model parameters.
+            current_q_params: Current quantum model parameters.
+            current_c_params: Current classical model parameters.
+            current_batch_stats: Current batch statistics
         """
         if current_val_loss < self.best_val_loss:
             if current_q_params is not None:
                 self.best_q_params = current_q_params
             if current_c_params is not None:
                 self.best_c_params = current_c_params
+            if current_batch_stats is not None:
+                self.best_batch_stats = current_batch_stats
             self.best_val_loss = current_val_loss
 
     def load_best_model(self, optimizer) -> None:
@@ -116,3 +123,5 @@ class BestModelCheckpoint:
             optimizer._q_params = self.best_q_params
         if self.best_c_params is not None:
             optimizer._c_params = self.best_c_params
+        if self.best_batch_stats is not None:
+            optimizer._batch_stats = self.best_batch_stats
