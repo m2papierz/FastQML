@@ -300,8 +300,9 @@ class QuantumOptimizer(Optimizer):
         Returns:
             Loss value for the given data and targets.
         """
-        return self._calculate_loss(params, data, targets)
-
+        return self._calculate_loss(
+            weights=params, x_data=data, y_data=targets
+        )
 
     def _training_epoch(
             self,
@@ -358,7 +359,6 @@ class QuantumOptimizer(Optimizer):
 
         return average_loss
 
-
     def optimize(
             self,
             train_data: Union[np.ndarray, torch.Tensor, DataLoader],
@@ -381,7 +381,8 @@ class QuantumOptimizer(Optimizer):
             val_loss = self._validation_epoch()
 
             if self._best_model_checkpoint:
-                self._best_model_checkpoint.update(self._q_params, val_loss)
+                self._best_model_checkpoint.update(
+                    current_val_loss=val_loss, current_q_params=self._q_params)
 
             # Early stopping logic
             if self._early_stopping:
@@ -395,6 +396,445 @@ class QuantumOptimizer(Optimizer):
                 print(
                     f"Epoch {epoch + 1}/{epochs_num} - "
                     f"train_loss: {train_loss:.5f} - val_loss: {val_loss:.5f}"
+                )
+
+        # Load best model parameters at the end of training
+        if self._best_model_checkpoint:
+            self._best_model_checkpoint.load_best_model(self)
+
+
+@register_pytree_node_class
+class ClassicalOptimizer(Optimizer):
+    def __init__(
+            self,
+            c_params: Union[jnp.ndarray, None],
+            q_params: Union[jnp.ndarray, None],
+            batch_stats: Union[jnp.ndarray, None],
+            model: [qml.qnode, Callable],
+            loss_fn: Callable,
+            learning_rate: float,
+            batch_size: int,
+            early_stopping: EarlyStopping = None,
+            retrieve_best_weights: bool = True
+    ):
+        super().__init__(
+            c_params=c_params,
+            q_params=q_params,
+            batch_stats=batch_stats,
+            model=model,
+            loss_fn=loss_fn,
+            learning_rate=learning_rate,
+            batch_size=batch_size,
+            early_stopping=early_stopping,
+            retrieve_best_weights=retrieve_best_weights
+        )
+
+    def _calculate_loss(
+            self,
+            weights: jnp.ndarray,
+            x_data: jnp.ndarray,
+            y_data: jnp.ndarray,
+            training: bool
+    ):
+        """
+        Calculates the loss for a given set of weights, input data, and target data.
+
+        Args:
+            weights: Parameters of the quantum model.
+            x_data: Input data for the model.
+            y_data: Target data for training.
+
+        Returns:
+            Computed loss value.
+        """
+        outs = self._model(
+            weights=weights, x_data=x_data,
+            batch_stats=self._batch_stats, training=training)
+
+        if self._batch_stats and training:
+            predictions, self._batch_stats = outs
+        else:
+            predictions = outs
+
+        loss_val = self._loss_fn(predictions, y_data).mean()
+
+        return loss_val
+
+    @jax.jit
+    def _update_step(
+            self,
+            weights: jnp.ndarray,
+            opt_state: OptimizerState,
+            data: jnp.ndarray,
+            targets: jnp.ndarray
+    ):
+        """
+        Perform a single update step.
+
+        Args:
+            weights: Model parameters.
+            opt_state: Pytree representing the optimizer state to be updated.
+            data: Input data.
+            targets: Target data.
+
+        Returns:
+            Updated parameters, optimizer state, and loss value.
+        """
+        loss_val, grads = jax.value_and_grad(
+            self._calculate_loss)(weights, data, targets, True)
+
+        # Update quantum model parameters
+        updates, opt_state = self._opt.update(grads, opt_state)
+        weights = optax.apply_updates(weights, updates)
+
+        return weights, opt_state, loss_val
+
+    @jax.jit
+    def _validation_step(
+            self,
+            params: jnp.ndarray,
+            data: jnp.ndarray,
+            targets: jnp.ndarray
+    ):
+        """
+        Perform a validation step.
+
+        Args:
+            params: Model parameters.
+            data: Input data.
+            targets: Target data.
+
+        Returns:
+            Loss value for the given data and targets.
+        """
+        return self._calculate_loss(
+            weights=params, x_data=data, y_data=targets, training=False
+        )
+
+
+    def _perform_training_epoch(
+            self,
+            opt_state: OptimizerState
+    ) -> Tuple[float, OptimizerState]:
+        """
+        Performs a single training epoch.
+
+        Args:
+            opt_state: Current state of the optimizer.
+
+        Returns:
+            Average training loss for the epoch.
+        """
+        total_loss, num_batches = 0.0, 0
+
+        # Process each batch
+        for x_batch, y_batch in iter(self._train_loader):
+            # Update parameters and optimizer states, calculate batch loss
+            x_batch, y_batch = jnp.array(x_batch), jnp.array(y_batch)
+            self._c_params, opt_state, batch_loss = self._update_step(
+                self._c_params, opt_state, x_batch, y_batch)
+
+            # Accumulate total loss and count the batch
+            total_loss += batch_loss
+            num_batches += 1
+
+        # Calculate average loss if there are batches processed
+        average_loss = total_loss / num_batches if num_batches > 0 else 0
+
+        return average_loss, opt_state
+
+    def _perform_validation_epoch(self) -> float:
+        """
+        Performs a validation step.
+
+        Returns:
+            Average validation loss.
+        """
+        total_loss, num_batches = 0.0, 0
+
+        # Process each batch
+        for x_batch, y_batch in iter(self._val_loader):
+            # Calculate batch loss
+            x_batch, y_batch = jnp.array(x_batch), jnp.array(y_batch)
+            batch_loss = self._validation_step(self._c_params, x_batch, y_batch)
+
+            # Accumulate total loss and count the batch
+            total_loss += batch_loss
+            num_batches += 1
+
+        # Calculate average loss if there are batches processed
+        average_loss = total_loss / num_batches if num_batches > 0 else 0
+
+        return average_loss
+
+
+    def optimize(
+            self,
+            train_data: Union[np.ndarray, torch.Tensor, DataLoader],
+            train_targets: Union[np.ndarray, torch.Tensor, None],
+            val_data: Union[np.ndarray, torch.Tensor, DataLoader],
+            val_targets: Union[np.ndarray, torch.Tensor, None],
+            epochs_num: int,
+            verbose: bool
+    ) -> None:
+
+        self._train_loader, self._val_loader = self._set_dataloaders(
+            train_data=train_data,
+            train_targets=train_targets,
+            val_data=val_data,
+            val_targets=val_targets
+        )
+
+        opt_state = self._opt.init(self._c_params)
+
+        for epoch in range(epochs_num):
+            train_loss, opt_state = self._perform_training_epoch(
+                opt_state=opt_state)
+            val_loss = self._perform_validation_epoch()
+
+            if self._best_model_checkpoint:
+                self._best_model_checkpoint.update(
+                    current_val_loss=val_loss, current_c_params=self._c_params)
+
+            # Early stopping logic
+            if self._early_stopping:
+                self._early_stopping(val_loss)
+                if self._early_stopping.stop_training:
+                    if verbose:
+                        print(f"Stopping early at epoch {epoch}.")
+                    break
+
+            if verbose:
+                print(
+                    f"Epoch {epoch + 1}/{epochs_num} - "
+                    f"train_loss: {train_loss:.9f} - val_loss: {val_loss:.9f}"
+                )
+
+        # Load best model parameters at the end of training
+        if self._best_model_checkpoint:
+            self._best_model_checkpoint.load_best_model(self)
+
+
+@register_pytree_node_class
+class HybridOptimizer(Optimizer):
+    def __init__(
+            self,
+            c_params: Union[jnp.ndarray, None],
+            q_params: Union[jnp.ndarray, None],
+            batch_stats: Union[jnp.ndarray, None],
+            model: [qml.qnode, Callable],
+            loss_fn: Callable,
+            learning_rate: float,
+            batch_size: int,
+            early_stopping: EarlyStopping = None,
+            retrieve_best_weights: bool = True
+    ):
+        super().__init__(
+            c_params=c_params,
+            q_params=q_params,
+            batch_stats=batch_stats,
+            model=model,
+            loss_fn=loss_fn,
+            learning_rate=learning_rate,
+            batch_size=batch_size,
+            early_stopping=early_stopping,
+            retrieve_best_weights=retrieve_best_weights
+        )
+
+        self._c_opt = optax.adam(learning_rate=learning_rate)
+        self._q_opt = optax.adam(learning_rate=learning_rate)
+
+    def _calculate_loss(
+            self,
+            c_weights: jnp.ndarray,
+            q_weights: jnp.ndarray,
+            x_data: jnp.ndarray,
+            y_data: jnp.ndarray,
+            training: bool
+    ):
+        """
+        Calculates the loss for a given set of weights, input data, and target data.
+
+        Args:
+           c_weights: Parameters of the classical model.
+            q_weights: Parameters of the quantum model.
+            x_data: Input data for the model.
+            y_data: Target data for training.
+
+        Returns:
+            Computed loss value.
+        """
+        outs = self._model(
+            c_weights=c_weights,
+            q_weights=q_weights,
+            x_data=x_data,
+            batch_stats=self._batch_stats,
+            training=training
+        )
+
+        if self._batch_stats and training:
+            predictions, self._batch_stats = outs
+        else:
+            predictions = outs
+
+        predictions = jnp.array(predictions).T
+        loss_val = self._loss_fn(predictions, y_data).mean()
+
+        return loss_val
+
+    @jax.jit
+    def _update_step(
+            self,
+            c_params: jnp.ndarray,
+            q_params: jnp.ndarray,
+            c_opt_state: OptimizerState,
+            q_opt_state: OptimizerState,
+            data: jnp.ndarray,
+            targets: jnp.ndarray
+    ):
+        """
+        Perform a single update step.
+
+        Args:
+            c_params: Classical model parameters.
+            q_params: Quantum model parameters.
+            c_opt_state: Pytree representing the optimizer state to be updated.
+            q_opt_state:
+            data: Input data.
+            targets: Target data.
+
+        Returns:
+            Updated parameters, optimizer state, and loss value.
+        """
+        loss_val, (c_grads, q_grads) = jax.value_and_grad(
+            self._calculate_loss, argnums=(0, 1))(c_params, q_params, data, targets, True)
+
+        # Classical model parameters update
+        c_updates, c_opt_state = self._c_opt.update(c_grads, c_opt_state)
+        c_params = optax.apply_updates(c_params, c_updates)
+
+        # Quantum model parameters update
+        q_updates, q_opt_state = self._q_opt.update(q_grads, q_opt_state)
+        q_params = optax.apply_updates(q_params, q_updates)
+
+        return c_params, q_params, c_opt_state, q_opt_state, loss_val
+
+    @jax.jit
+    def _validation_step(
+            self,
+            c_params: jnp.ndarray,
+            q_params: jnp.ndarray,
+            data: jnp.ndarray,
+            targets: jnp.ndarray
+    ):
+        """
+        Perform a validation step.
+
+        Args:
+            c_params: Classical model parameters.
+            q_params: Quantum model parameters.
+            data: Input data.
+            targets: Target data.
+
+        Returns:
+            Loss value for the given data and targets.
+        """
+        return self._calculate_loss(
+            c_weights=c_params, q_weights=q_params,
+            x_data=data, y_data=targets, training=False
+        )
+
+
+    def _perform_training_epoch(
+            self,
+            c_opt_state: OptimizerState,
+            q_opt_state: OptimizerState
+    ):
+        total_loss, num_batches = 0.0, 0
+
+        # Process each batch
+        for x_batch, y_batch in iter(self._train_loader):
+            # Update parameters and optimizer states, calculate batch loss
+            x_batch, y_batch = jnp.array(x_batch), jnp.array(y_batch)
+            update_args = (
+                self._c_params, self._q_params, c_opt_state, q_opt_state, x_batch, y_batch
+            )
+            self._c_params, self._q_params, c_opt_state, q_opt_state, loss = self._update_step(
+                *update_args)
+
+            # Accumulate total loss and count the batch
+            total_loss += loss
+            num_batches += 1
+
+        # Calculate average loss if there are batches processed
+        average_loss = total_loss / num_batches if num_batches > 0 else 0
+
+        return average_loss, c_opt_state, q_opt_state
+
+    def _perform_validation_epoch(self) -> float:
+        total_loss, num_batches = 0.0, 0
+
+        # Process each batch
+        for x_batch, y_batch in iter(self._val_loader):
+            # Calculate batch loss
+            x_batch, y_batch = jnp.array(x_batch), jnp.array(y_batch)
+            batch_loss = self._validation_step(
+                self._c_params, self._q_params, x_batch, y_batch)
+
+            # Accumulate total loss and count the batch
+            total_loss += batch_loss
+            num_batches += 1
+
+        # Calculate average loss if there are batches processed
+        average_loss = total_loss / num_batches if num_batches > 0 else 0
+
+        return average_loss
+
+
+    def optimize(
+            self,
+            train_data: Union[np.ndarray, torch.Tensor, DataLoader],
+            train_targets: Union[np.ndarray, torch.Tensor, None],
+            val_data: Union[np.ndarray, torch.Tensor, DataLoader],
+            val_targets: Union[np.ndarray, torch.Tensor, None],
+            epochs_num: int,
+            verbose: bool
+    ) -> None:
+
+        self._train_loader, self._val_loader = self._set_dataloaders(
+            train_data=train_data,
+            train_targets=train_targets,
+            val_data=val_data,
+            val_targets=val_targets
+        )
+
+        c_opt_state = self._c_opt.init(self._c_params)
+        q_opt_state = self._q_opt.init(self._q_params)
+
+        for epoch in range(epochs_num):
+            train_loss, c_opt_state, q_opt_state = self._perform_training_epoch(
+                c_opt_state=c_opt_state, q_opt_state=q_opt_state)
+            val_loss = self._perform_validation_epoch()
+
+            if self._best_model_checkpoint:
+                self._best_model_checkpoint.update(
+                    current_val_loss=val_loss,
+                    current_c_params=self._c_params,
+                    current_q_params=self._q_params
+                )
+
+            # Early stopping logic
+            if self._early_stopping:
+                self._early_stopping(val_loss)
+                if self._early_stopping.stop_training:
+                    if verbose:
+                        print(f"Stopping early at epoch {epoch}.")
+                    break
+
+            if verbose:
+                print(
+                    f"Epoch {epoch + 1}/{epochs_num} - "
+                    f"train_loss: {train_loss:.9f} - val_loss: {val_loss:.9f}"
                 )
 
         # Load best model parameters at the end of training
