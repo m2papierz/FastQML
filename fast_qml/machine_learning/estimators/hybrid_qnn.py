@@ -8,9 +8,12 @@
 #
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
-from typing import Union, Tuple
+from typing import (
+    Union, Dict, Any, Tuple, Callable, Mapping)
 
+import jax
 import flax.linen as nn
+import pennylane as qml
 from jax import numpy as jnp
 
 from fast_qml.machine_learning.estimator import HybridEstimator
@@ -18,7 +21,103 @@ from fast_qml.machine_learning.estimators.qnn import QNNRegressor, QNNClassifier
 from fast_qml.machine_learning.estimators.vqa import VQRegressor, VQClassifier
 
 
-class HybridRegressor(HybridEstimator):
+class HybridModel(HybridEstimator):
+    def __init__(
+            self,
+            input_shape,
+            c_model: nn.Module,
+            q_model: Union[VQRegressor, VQClassifier, QNNRegressor, QNNClassifier],
+            loss_fn: Callable,
+            batch_norm: bool
+    ):
+        super().__init__(
+            input_shape=input_shape,
+            c_model=c_model,
+            q_model=q_model,
+            loss_fn=loss_fn,
+            batch_norm=batch_norm
+        )
+
+    def _initialize_parameters(
+            self,
+            input_shape: Union[int, Tuple[int]],
+            batch_norm: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Initializes weights for the classical and quantum models.
+
+        Args:
+            input_shape: The shape of the input data.
+
+        Returns:
+            A dictionary containing initialized weights for both classical and quantum models.
+        """
+        if not all(isinstance(dim, int) for dim in input_shape):
+            raise ValueError("input_shape must be a tuple or list of integers.")
+
+        c_inp = jax.random.normal(self._inp_rng, shape=(1, *input_shape))
+
+        if batch_norm:
+            variables = self._c_model.init(self._init_rng, c_inp, train=False)
+            c_weights, batch_stats = variables['params'], variables['batch_stats']
+            return {
+                'c_weights': c_weights,
+                'q_weights': self._q_model.weights,
+                'batch_stats': batch_stats
+            }
+        else:
+            variables = self._c_model.init(self._init_rng, c_inp)
+            c_weights = variables['params']
+            return {
+                'c_weights': c_weights,
+                'q_weights': self._q_model.weights
+            }
+
+    def _model(
+            self,
+            c_weights: Dict[str, Mapping[str, jnp.ndarray]],
+            q_weights: jnp.ndarray,
+            x_data: jnp.ndarray,
+            batch_stats: Union[Dict[str, Mapping[str, jnp.ndarray]], None],
+            training: bool
+    ):
+        """
+        Defines the hybrid model by combining classical and quantum models.
+
+        Args:
+            c_weights: Weights of the classical model.
+            q_weights: Weights of the quantum model.
+            x_data: Input data for the model.
+
+        Returns:
+            The output of the hybrid model.
+        """
+        def _hybrid_model():
+            if self._batch_norm:
+                if training:
+                    c_out, updates = self._c_model.apply(
+                        {'params': c_weights, 'batch_stats': batch_stats},
+                        x_data, train=training, mutable=['batch_stats'])
+                    q_out = self._q_model.q_model(
+                        weights=q_weights, x_data=jax.numpy.array(c_out))
+                    return jax.numpy.array(q_out), updates['batch_stats']
+                else:
+                    c_out = self._c_model.apply(
+                        {'params': c_weights, 'batch_stats': batch_stats},
+                        x_data, train=training, mutable=False)
+                    q_out = self._q_model.q_model(
+                        weights=q_weights, x_data=jax.numpy.array(c_out))
+                    return jax.numpy.array(q_out)
+            else:
+                c_out = self._c_model.apply({'params': c_weights}, x_data)
+                q_out = self._q_model.q_model(
+                    weights=q_weights, x_data=jax.numpy.array(c_out))
+                return jax.numpy.array(q_out)
+
+        return _hybrid_model()
+
+
+class HybridRegressor(HybridModel):
     """
     A hybrid quantum-classical regressor for regression tasks.
 
@@ -30,16 +129,21 @@ class HybridRegressor(HybridEstimator):
         c_model: The classical neural network model.
         q_model: The quantum regression model.
     """
+
     def __init__(
             self,
-            input_shape: Union[int, Tuple[int]],
+            input_shape,
             c_model: nn.Module,
-            q_model: Union[VQRegressor, QNNRegressor]
+            q_model: Union[VQRegressor, QNNRegressor],
+            loss_fn: Callable,
+            batch_norm: bool
     ):
         super().__init__(
             input_shape=input_shape,
             c_model=c_model,
-            q_model=q_model
+            q_model=q_model,
+            loss_fn=loss_fn,
+            batch_norm=batch_norm
         )
 
     def predict(
@@ -52,41 +156,38 @@ class HybridRegressor(HybridEstimator):
         Args:
             x: An array of input data.
         """
-        return jnp.array(self._model(
-            c_weights=self._weights['c_weights'],
-            q_weights=self._weights['q_weights'],
-            x_data=x)
+        if self._batch_norm:
+            c_weights, batch_stats = (
+                self._params['c_weights'], self._params['batch_stats'])
+        else:
+            c_weights, batch_stats = self._params['c_weights'], None
+        q_weights = self._params['q_weights']
+
+        return jnp.array(
+            self._model(
+                c_weights=c_weights, q_weights=q_weights,
+                x_data=x, batch_stats=batch_stats, training=False)
         ).ravel()
 
 
-class HybridClassifier(HybridEstimator):
-    """
-    A hybrid quantum-classical classifier for classification tasks.
-
-    This class extends the HybridEstimator for classification tasks using quantum neural networks
-    or variational quantum algorithms combined with classical neural networks.
-
-    Args:
-        input_shape: The shape of the input data.
-        c_model: The classical neural network model.
-        q_model: The quantum classification model.
-
-    Attributes:
-        _classes_num: Number of classes in the classification task.
-    """
+class HybridClassifier(HybridModel):
     def __init__(
             self,
-            input_shape: Union[int, Tuple[int]],
+            input_shape,
             c_model: nn.Module,
-            q_model: Union[VQClassifier, QNNClassifier]
+            q_model: Union[VQClassifier, QNNClassifier],
+            loss_fn: Callable,
+            batch_norm: bool
     ):
         super().__init__(
             input_shape=input_shape,
             c_model=c_model,
-            q_model=q_model
+            q_model=q_model,
+            loss_fn=loss_fn,
+            batch_norm=batch_norm
         )
 
-        self._classes_num = self._q_model.classes_num
+        self._num_classes = self._q_model.num_classes
 
     def predict_proba(
             self,
@@ -104,15 +205,22 @@ class HybridClassifier(HybridEstimator):
             a single probability for each sample. For multi-class classification, this will be a 2D array
             where each row corresponds to a sample and each column corresponds to a class.
         """
-        outputs = jnp.array(self._model(
-            c_weights=self._weights['c_weights'],
-            q_weights=self._weights['q_weights'],
-            x_data=x)
-        )
-        if self._classes_num == 2:
-            return outputs.ravel()
+        if self._batch_norm:
+            c_weights, batch_stats = (
+                self._params['c_weights'], self._params['batch_stats'])
         else:
-            return outputs.T
+            c_weights, batch_stats = self._params['c_weights'], None
+        q_weights = self._params['q_weights']
+
+        logits = self._model(
+            c_weights=c_weights, q_weights=q_weights,
+            x_data=x, batch_stats=batch_stats, training=False
+        )
+
+        if self._num_classes == 2:
+            return jnp.array(logits).ravel()
+        else:
+            return jnp.array(logits).T
 
     def predict(
             self,
@@ -137,7 +245,7 @@ class HybridClassifier(HybridEstimator):
         """
         predictions = self.predict_proba(x)
 
-        if self._q_model.classes_num == 2:
+        if self._num_classes == 2:
             return jnp.where(predictions >= threshold, 1, 0)
         else:
             return jnp.argmax(predictions, axis=1)
