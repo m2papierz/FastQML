@@ -185,22 +185,22 @@ class VQClassifier(VariationalQuantumEstimator):
     This class is ideal for tasks where the goal is to categorize inputs into discrete classes.
 
     Args:
-        classes_num: Number of classes in the classification problem.
+        num_classes: Number of classes in the classification problem.
     """
     def __init__(
             self,
             n_qubits: int,
             feature_map: FeatureMap,
             ansatz: VariationalForm,
-            classes_num: int,
+            num_classes: int,
             loss_fn: Callable,
             measurement_op: Callable = qml.PauliZ
     ):
-        if classes_num == 2:
+        if num_classes == 2:
             measurements_num = 1
         else:
-            measurements_num = classes_num
-        self.classes_num = classes_num
+            measurements_num = num_classes
+        self.num_classes = num_classes
 
         super().__init__(
             n_qubits=n_qubits,
@@ -227,8 +227,10 @@ class VQClassifier(VariationalQuantumEstimator):
             a single probability for each sample. For multi-class classification, this will be a 2D array
             where each row corresponds to a sample and each column corresponds to a class.
         """
-        logits = jnp.array(self.q_model(self.weights, x))
-        if self.classes_num == 2:
+        logits = jnp.array(
+            self.q_model( weights=self.weights, x_data=x))
+
+        if self.num_classes == 2:
             return logits.ravel()
         else:
             return logits.T
@@ -256,7 +258,7 @@ class VQClassifier(VariationalQuantumEstimator):
         """
         logits = self.predict_proba(x)
 
-        if self.classes_num == 2:
+        if self.num_classes == 2:
             return jnp.where(logits >= threshold, 1, 0)
         else:
             return jnp.argmax(logits, axis=1)
