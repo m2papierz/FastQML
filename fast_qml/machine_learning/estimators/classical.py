@@ -18,6 +18,20 @@ from jax import numpy as jnp
 from fast_qml.machine_learning.estimator import ClassicalEstimator
 
 class ClassicalModel(ClassicalEstimator):
+    """
+    Specialized class for constructing and training classical neural network models.
+
+    Inherits from ClassicalEstimator and focuses on leveraging classical computing resources for machine learning
+    tasks. It provides a structured approach to model definition, parameter initialization, and training, facilitating
+    the use of advanced features such as batch normalization and customizable optimization strategies.
+
+    Args:
+        input_shape: The shape of the input data.
+        c_model: The classical neural network model.
+        loss_fn: The loss function used to evaluate the model.
+        optimizer: The optimization algorithm.
+        batch_norm: Indicates whether batch normalization is used within the model.
+    """
     def __init__(
             self,
             input_shape: Union[int, Tuple[int]],
@@ -37,16 +51,17 @@ class ClassicalModel(ClassicalEstimator):
     def _initialize_parameters(
             self,
             input_shape: Union[int, Tuple[int]],
-            batch_norm: bool = False
+            batch_norm: bool
     ) -> Dict[str, Any]:
         """
-        Initializes weights for the classical and quantum models.
+        Initializes parameters for the classical and quantum models.
 
         Args:
             input_shape: The shape of the input data.
+            batch_norm: Indicates whether batch normalization is used within the model.
 
         Returns:
-            A dictionary containing initialized weights for both classical and quantum models.
+            A dictionary containing initialized parameters.
         """
         if not all(isinstance(dim, int) for dim in input_shape):
             raise ValueError("input_shape must be a tuple or list of integers.")
@@ -55,21 +70,23 @@ class ClassicalModel(ClassicalEstimator):
 
         if batch_norm:
             variables = self._c_model.init(self._init_rng, c_inp, train=False)
+            weights, batch_stats = variables['params'], variables['batch_stats']
             return {
-                'weights': variables['params'],
-                'batch_stats': variables['batch_stats']
+                'weights': weights,
+                'batch_stats': batch_stats
             }
         else:
             variables = self._c_model.init(self._init_rng, c_inp)
+            weights = variables['params']
             return {
-                'weights': variables['params']
+                'weights': weights
             }
 
     def _model(
             self,
             weights: Dict[str, Mapping[str, jnp.ndarray]],
-            x_data: jnp.ndarray,
             batch_stats: Union[Dict[str, Mapping[str, jnp.ndarray]], None],
+            x_data: jnp.ndarray,
             training: bool
     ):
         """
@@ -77,10 +94,12 @@ class ClassicalModel(ClassicalEstimator):
 
         Args:
             weights: Weights of the classical model.
+            batch_stats: Batch statistics for batch normalization.
             x_data: Input data for the model.
+            training: Boolean flag indicating if training model inference.
 
         Returns:
-            The output of the hybrid model.
+            The output of the classical model.
         """
         def _classical_model():
             if self._batch_norm:
@@ -102,6 +121,17 @@ class ClassicalModel(ClassicalEstimator):
 
 
 class ClassicalRegressor(ClassicalModel):
+    """
+    A classical regressor for regression tasks. This class extends the ClassicalModel for regression
+    tasks using classical neural networks.
+
+    Args:
+        input_shape: The shape of the input data.
+        c_model: The classical neural network model.
+        loss_fn: The loss function used to evaluate the model.
+        optimizer: The optimization algorithm.
+        batch_norm: Indicates whether batch normalization is used within the model.
+    """
     def __init__(
             self,
             input_shape: Union[int, Tuple[int]],
@@ -142,6 +172,18 @@ class ClassicalRegressor(ClassicalModel):
 
 
 class ClassicalClassifier(ClassicalModel):
+    """
+    A classical classifier for classification tasks. This class extends the ClassicalModel for
+    classification tasks using classical neural networks.
+
+    Args:
+        input_shape: The shape of the input data.
+        c_model: The classical neural network model.
+        loss_fn: The loss function used to evaluate the model.
+        optimizer: The optimization algorithm.
+        batch_norm: Indicates whether batch normalization is used within the model.
+        num_classes: Number of classes in the classification problem.
+    """
     def __init__(
             self,
             input_shape: Union[int, Tuple[int]],
