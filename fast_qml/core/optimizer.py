@@ -9,7 +9,7 @@
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
 from abc import abstractmethod
-from typing import  Callable, Tuple, Union, Dict, Mapping
+from typing import  Callable, Tuple, Union, Dict, Mapping, Any
 
 import jax
 import optax
@@ -25,20 +25,35 @@ from jax.tree_util import register_pytree_node_class
 from fast_qml.core.callbacks import EarlyStopping
 from fast_qml.core.callbacks import BestModelCheckpoint
 
+"""
+FastQML core module providing classes for implementing various optimization algorithms specifically designed 
+for quantum machine learning models. These optimizers are tailored to work with quantum Pennylane nodes, Flax
+classical models and hybrid quantum-classical models.
+
+Classes:
+    - Optimizer: Base class for quantum model optimizers.
+    - QuantumOptimizer: Optimizer designed to work with quantum-only Pennylane models.
+    - ClassicalOptimizer: Optimizer designed to work with classical Flax models.
+    - HybridOptimizer: Optimizer designed to work with quantum-classical models.
+"""
+
 
 class Optimizer:
     """
-    Base class for optimizers used in quantum machine learning models.
+    Base class for optimizers used in FastQML quantum machine learning models.
 
-    This class provides the foundational structure for implementing various core
-    algorithms. It is designed to integrate with both classical Flax deep learning models
-    and quantum models.
+    This class provides the foundational structure for implementing various core algorithms.
+    It is designed to integrate with classical Flax deep learning models, Pennylane quantum models,
+    and hybrid quantum-classical models.
 
     Args:
         c_params: Parameters of the classical model.
         q_params: Parameters of the quantum model.
+        batch_stats: Statistics for batch normalization layers if applicable.
         model: Quantum node representing the quantum circuit.
         loss_fn: Loss function used for core.
+        c_optimizer: The optimizer for classical parameters. It should be compatible with the optax API.
+        q_optimizer : The optimizer for quantum parameters. It should be compatible with the optax API.
         batch_size: Batch size for training.
         early_stopping: Instance of EarlyStopping to be used during training.
         retrieve_best_weights: Boolean flag indicating if to use BestModelCheckpoint.
@@ -50,7 +65,8 @@ class Optimizer:
             batch_stats: Union[Dict[str, Mapping[str, jnp.ndarray]], None],
             model: [qml.qnode, Callable],
             loss_fn: Callable,
-            optimizer: optax.GradientTransformation,
+            c_optimizer: Union[optax.GradientTransformation, None],
+            q_optimizer: Union[optax.GradientTransformation, None],
             batch_size: int,
             early_stopping: EarlyStopping = None,
             retrieve_best_weights: bool = True
@@ -68,7 +84,9 @@ class Optimizer:
         if retrieve_best_weights:
             self._best_model_checkpoint = BestModelCheckpoint()
 
-        self._opt = optimizer
+        self._c_opt = c_optimizer
+        self._q_opt = q_optimizer
+
         self._train_loader, self._val_loader = None, None
 
     def tree_flatten(self):
@@ -81,7 +99,8 @@ class Optimizer:
         aux_data = {
             'model': self._model,
             'loss_fn': self._loss_fn,
-            'optimizer': self._opt,
+            'c_optimizer': self._c_opt,
+            'q_optimizer': self._q_opt,
             'batch_size': self._batch_size
         }
         return children, aux_data
@@ -92,6 +111,13 @@ class Optimizer:
         Reconstructs the class instance from JAX tree operations.
         """
         return cls(*children, **aux_data)
+
+    @property
+    def batch_stats(self):
+        """
+        Property to get the current batch statistics.
+        """
+        return self._batch_stats
 
     @property
     def weights(
@@ -200,19 +226,54 @@ class Optimizer:
             epochs_num: int,
             verbose: bool
     ):
+        """
+        Abstract method for the optimization loop.
+
+        This method should be implemented by subclasses to define the specific
+        optimization algorithm.
+
+        Args:
+            train_data: The training dataset. This can be in the form of a DataLoader, which directly
+                provides batches of data, or a NumPy array or PyTorch tensor, from which a DataLoader will be created.
+            train_targets: The target labels or values for the training data. Required if `train_data` is not
+                a DataLoader. If `train_data` is a DataLoader, this should be None.
+            val_data: The validation dataset. Similar to `train_data`, this can be a DataLoader, a NumPy
+                array, or a PyTorch tensor.
+            val_targets: The target labels or values for the validation data. Required if `val_data` is not
+                a DataLoader. If `val_data` is a DataLoader, this should be None.
+            epochs_num: The number of epochs to run the optimization loop.
+            verbose: Boolean flag indicating whether to print training progress.
+        """
         return NotImplementedError("Subclasses must implement this method.")
 
 
 @register_pytree_node_class
 class QuantumOptimizer(Optimizer):
+    """
+    Quantum Optimizer that extends from a base Optimizer class. This optimizer is specifically designed
+    to optimize fully Pennylane quantum models.
+
+    Args:
+        c_params: Parameters of the classical model.
+        q_params: Parameters of the quantum model.
+        batch_stats: Statistics for batch normalization layers if applicable.
+        model: Quantum node representing the quantum circuit.
+        loss_fn: Loss function used for core.
+        c_optimizer: The optimizer for classical parameters. It should be compatible with the optax API.
+        q_optimizer : The optimizer for quantum parameters. It should be compatible with the optax API.
+        batch_size: Batch size for training.
+        early_stopping: Instance of EarlyStopping to be used during training.
+        retrieve_best_weights: Boolean flag indicating if to use BestModelCheckpoint.
+    """
     def __init__(
             self,
-            c_params: Union[jnp.ndarray, None],
+            c_params: Union[Dict[str, Mapping[str, jnp.ndarray]], None],
             q_params: Union[jnp.ndarray, None],
             batch_stats: Union[jnp.ndarray, None],
             model: [qml.qnode, Callable],
             loss_fn: Callable,
-            optimizer: optax.GradientTransformation,
+            c_optimizer: Union[optax.GradientTransformation, None],
+            q_optimizer: Union[optax.GradientTransformation, None],
             batch_size: int,
             early_stopping: EarlyStopping = None,
             retrieve_best_weights: bool = True
@@ -223,7 +284,8 @@ class QuantumOptimizer(Optimizer):
             batch_stats=batch_stats,
             model=model,
             loss_fn=loss_fn,
-            optimizer=optimizer,
+            c_optimizer=c_optimizer,
+            q_optimizer=q_optimizer,
             batch_size=batch_size,
             early_stopping=early_stopping,
             retrieve_best_weights=retrieve_best_weights
@@ -234,7 +296,7 @@ class QuantumOptimizer(Optimizer):
             weights: jnp.ndarray,
             x_data: jnp.ndarray,
             y_data: jnp.ndarray
-    ):
+    ) -> float:
         """
         Calculates the loss for a given set of weights, input data, and target data.
 
@@ -275,7 +337,7 @@ class QuantumOptimizer(Optimizer):
             self._calculate_loss)(params, data, targets)
 
         # Update quantum model parameters
-        updates, opt_state = self._opt.update(grads, opt_state)
+        updates, opt_state = self._q_opt.update(grads, opt_state, params)
         params = optax.apply_updates(params, updates)
 
         return params, opt_state, loss_val
@@ -286,7 +348,7 @@ class QuantumOptimizer(Optimizer):
             params: jnp.ndarray,
             data: jnp.ndarray,
             targets: jnp.ndarray
-    ) -> jnp.ndarray:
+    ) -> float:
         """
         Perform a validation step.
 
@@ -366,13 +428,28 @@ class QuantumOptimizer(Optimizer):
             epochs_num: int,
             verbose: bool
     ) -> None:
+        """
+        Executes the optimization loop for training and validating the quantum model.
 
+        Args:
+            train_data: The training dataset. This can be in the form of a DataLoader, which directly
+                provides batches of data, or a NumPy array or PyTorch tensor, from which a DataLoader will be created.
+            train_targets: The target labels or values for the training data. Required if `train_data` is not
+                a DataLoader. If `train_data` is a DataLoader, this should be None.
+            val_data: The validation dataset. Similar to `train_data`, this can be a DataLoader, a NumPy
+                array, or a PyTorch tensor.
+            val_targets: The target labels or values for the validation data. Required if `val_data` is not
+                a DataLoader. If `val_data` is a DataLoader, this should be None.
+            epochs_num: The number of epochs to run the optimization loop.
+            verbose: Boolean flag indicating whether to print training progress.
+        """
         self._train_loader, self._val_loader = self._set_dataloaders(
             train_data=train_data, train_targets=train_targets,
             val_data=val_data, val_targets=val_targets
         )
 
-        opt_state = self._opt.init(self._q_params)
+        self._q_opt = optax.chain(optax.clip(1.0), self._q_opt)
+        opt_state = self._q_opt.init(self._q_params)
 
         for epoch in range(epochs_num):
             train_loss, opt_state = self._training_epoch(opt_state=opt_state)
@@ -403,6 +480,22 @@ class QuantumOptimizer(Optimizer):
 
 @register_pytree_node_class
 class ClassicalOptimizer(Optimizer):
+    """
+    Classical Optimizer that extends from a base Optimizer class. This optimizer is specifically designed
+    to optimize fully classical Flax neural networks.
+
+    Args:
+        c_params: Parameters of the classical model.
+        q_params: Parameters of the quantum model.
+        batch_stats: Statistics for batch normalization layers if applicable.
+        model: Quantum node representing the quantum circuit.
+        loss_fn: Loss function used for core.
+        c_optimizer: The optimizer for classical parameters. It should be compatible with the optax API.
+        q_optimizer : The optimizer for quantum parameters. It should be compatible with the optax API.
+        batch_size: Batch size for training.
+        early_stopping: Instance of EarlyStopping to be used during training.
+        retrieve_best_weights: Boolean flag indicating if to use BestModelCheckpoint.
+    """
     def __init__(
             self,
             c_params: Union[jnp.ndarray, None],
@@ -410,7 +503,8 @@ class ClassicalOptimizer(Optimizer):
             batch_stats: Union[jnp.ndarray, None],
             model: [qml.qnode, Callable],
             loss_fn: Callable,
-            optimizer: optax.GradientTransformation,
+            c_optimizer: Union[optax.GradientTransformation, None],
+            q_optimizer: Union[optax.GradientTransformation, None],
             batch_size: int,
             early_stopping: EarlyStopping = None,
             retrieve_best_weights: bool = True
@@ -421,7 +515,8 @@ class ClassicalOptimizer(Optimizer):
             batch_stats=batch_stats,
             model=model,
             loss_fn=loss_fn,
-            optimizer=optimizer,
+            c_optimizer=c_optimizer,
+            q_optimizer=q_optimizer,
             batch_size=batch_size,
             early_stopping=early_stopping,
             retrieve_best_weights=retrieve_best_weights
@@ -430,38 +525,43 @@ class ClassicalOptimizer(Optimizer):
     def _calculate_loss(
             self,
             weights: jnp.ndarray,
+            batch_stats: jnp.ndarray,
             x_data: jnp.ndarray,
             y_data: jnp.ndarray,
             training: bool
-    ):
+    ) -> Tuple[float, jnp.ndarray]:
         """
-        Calculates the loss for a given set of weights, input data, and target data.
+        Calculates the loss for a given set of weights, batch stats,
+        input data, and target data.
 
         Args:
-            weights: Parameters of the quantum model.
+            weights: Parameters of the classical model.
+            batch_stats: Batch statistics for batch normalization.
             x_data: Input data for the model.
             y_data: Target data for training.
+            training: Boolean flag indicating if loss calculation is during training.
 
         Returns:
-            Computed loss value.
+            Computed loss value and batch statistics.
         """
         outs = self._model(
             weights=weights, x_data=x_data,
-            batch_stats=self._batch_stats, training=training)
+            batch_stats=batch_stats, training=training)
 
         if self._batch_stats and training:
-            predictions, self._batch_stats = outs
+            predictions, batch_stats = outs
         else:
             predictions = outs
 
         loss_val = self._loss_fn(predictions, y_data).mean()
 
-        return loss_val
+        return loss_val, batch_stats
 
     @jax.jit
     def _update_step(
             self,
             weights: jnp.ndarray,
+            batch_stats: jnp.ndarray,
             opt_state: OptimizerState,
             data: jnp.ndarray,
             targets: jnp.ndarray
@@ -471,26 +571,28 @@ class ClassicalOptimizer(Optimizer):
 
         Args:
             weights: Model parameters.
-            opt_state: Pytree representing the optimizer state to be updated.
+            batch_stats: Batch statistics for batch normalization.
+            opt_state: Pytree representing the optimizer state.
             data: Input data.
             targets: Target data.
 
         Returns:
-            Updated parameters, optimizer state, and loss value.
+            Updated parameters, batch stats, optimizer state, and loss value.
         """
-        loss_val, grads = jax.value_and_grad(
-            self._calculate_loss)(weights, data, targets, True)
+        (loss_val, batch_stats), grads = jax.value_and_grad(
+            self._calculate_loss, has_aux=True)(weights, batch_stats, data, targets, True)
 
         # Update quantum model parameters
-        updates, opt_state = self._opt.update(grads, opt_state)
+        updates, opt_state = self._c_opt.update(grads, opt_state, weights)
         weights = optax.apply_updates(weights, updates)
 
-        return weights, opt_state, loss_val
+        return weights, batch_stats, opt_state, loss_val
 
     @jax.jit
     def _validation_step(
             self,
             params: jnp.ndarray,
+            batch_stats: jnp.ndarray,
             data: jnp.ndarray,
             targets: jnp.ndarray
     ):
@@ -499,6 +601,7 @@ class ClassicalOptimizer(Optimizer):
 
         Args:
             params: Model parameters.
+            batch_stats: Batch statistics for batch normalization.
             data: Input data.
             targets: Target data.
 
@@ -506,7 +609,8 @@ class ClassicalOptimizer(Optimizer):
             Loss value for the given data and targets.
         """
         return self._calculate_loss(
-            weights=params, x_data=data, y_data=targets, training=False
+            weights=params, batch_stats=batch_stats,
+            x_data=data, y_data=targets, training=False
         )
 
 
@@ -521,7 +625,7 @@ class ClassicalOptimizer(Optimizer):
             opt_state: Current state of the optimizer.
 
         Returns:
-            Average training loss for the epoch.
+            Average training loss for the epoch and optimizer state.
         """
         total_loss, num_batches = 0.0, 0
 
@@ -529,8 +633,8 @@ class ClassicalOptimizer(Optimizer):
         for x_batch, y_batch in iter(self._train_loader):
             # Update parameters and optimizer states, calculate batch loss
             x_batch, y_batch = jnp.array(x_batch), jnp.array(y_batch)
-            self._c_params, opt_state, batch_loss = self._update_step(
-                self._c_params, opt_state, x_batch, y_batch)
+            self._c_params, self._batch_stats, opt_state, batch_loss = self._update_step(
+                self._c_params, self._batch_stats, opt_state, x_batch, y_batch)
 
             # Accumulate total loss and count the batch
             total_loss += batch_loss
@@ -554,7 +658,8 @@ class ClassicalOptimizer(Optimizer):
         for x_batch, y_batch in iter(self._val_loader):
             # Calculate batch loss
             x_batch, y_batch = jnp.array(x_batch), jnp.array(y_batch)
-            batch_loss = self._validation_step(self._c_params, x_batch, y_batch)
+            batch_loss, self._batch_stats = self._validation_step(
+                self._c_params, self._batch_stats, x_batch, y_batch)
 
             # Accumulate total loss and count the batch
             total_loss += batch_loss
@@ -575,7 +680,21 @@ class ClassicalOptimizer(Optimizer):
             epochs_num: int,
             verbose: bool
     ) -> None:
+        """
+        Executes the optimization loop for training and validating the classical model.
 
+        Args:
+            train_data: The training dataset. This can be in the form of a DataLoader, which directly
+                provides batches of data, or a NumPy array or PyTorch tensor, from which a DataLoader will be created.
+            train_targets: The target labels or values for the training data. Required if `train_data` is not
+                a DataLoader. If `train_data` is a DataLoader, this should be None.
+            val_data: The validation dataset. Similar to `train_data`, this can be a DataLoader, a NumPy
+                array, or a PyTorch tensor.
+            val_targets: The target labels or values for the validation data. Required if `val_data` is not
+                a DataLoader. If `val_data` is a DataLoader, this should be None.
+            epochs_num: The number of epochs to run the optimization loop.
+            verbose: Boolean flag indicating whether to print training progress.
+        """
         self._train_loader, self._val_loader = self._set_dataloaders(
             train_data=train_data,
             train_targets=train_targets,
@@ -583,7 +702,8 @@ class ClassicalOptimizer(Optimizer):
             val_targets=val_targets
         )
 
-        opt_state = self._opt.init(self._c_params)
+        self._c_opt = optax.chain(optax.clip(1.0),self._c_opt)
+        opt_state = self._c_opt.init(self._c_params)
 
         for epoch in range(epochs_num):
             train_loss, opt_state = self._perform_training_epoch(
@@ -592,7 +712,10 @@ class ClassicalOptimizer(Optimizer):
 
             if self._best_model_checkpoint:
                 self._best_model_checkpoint.update(
-                    current_val_loss=val_loss, current_c_params=self._c_params)
+                    current_val_loss=val_loss,
+                    current_c_params=self._c_params,
+                    current_batch_stats=self._batch_stats
+                )
 
             # Early stopping logic
             if self._early_stopping:
@@ -615,6 +738,22 @@ class ClassicalOptimizer(Optimizer):
 
 @register_pytree_node_class
 class HybridOptimizer(Optimizer):
+    """
+    Classical Optimizer that extends from a base Optimizer class. This optimizer is specifically designed
+    to optimize hybrid quantum-classical models.
+
+    Args:
+        c_params: Parameters of the classical model.
+        q_params: Parameters of the quantum model.
+        batch_stats: Statistics for batch normalization layers if applicable.
+        model: Quantum node representing the quantum circuit.
+        loss_fn: Loss function used for core.
+        c_optimizer: The optimizer for classical parameters. It should be compatible with the optax API.
+        q_optimizer : The optimizer for quantum parameters. It should be compatible with the optax API.
+        batch_size: Batch size for training.
+        early_stopping: Instance of EarlyStopping to be used during training.
+        retrieve_best_weights: Boolean flag indicating if to use BestModelCheckpoint.
+    """
     def __init__(
             self,
             c_params: Union[jnp.ndarray, None],
@@ -622,7 +761,8 @@ class HybridOptimizer(Optimizer):
             batch_stats: Union[jnp.ndarray, None],
             model: [qml.qnode, Callable],
             loss_fn: Callable,
-            optimizer: optax.GradientTransformation,
+            c_optimizer: Union[optax.GradientTransformation, None],
+            q_optimizer: Union[optax.GradientTransformation, None],
             batch_size: int,
             early_stopping: EarlyStopping = None,
             retrieve_best_weights: bool = True
@@ -633,31 +773,31 @@ class HybridOptimizer(Optimizer):
             batch_stats=batch_stats,
             model=model,
             loss_fn=loss_fn,
-            optimizer=optimizer,
+            c_optimizer=c_optimizer,
+            q_optimizer=q_optimizer,
             batch_size=batch_size,
             early_stopping=early_stopping,
             retrieve_best_weights=retrieve_best_weights
         )
-
-        self._c_opt = optimizer
-        self._q_opt = optimizer
-
     def _calculate_loss(
             self,
             c_weights: jnp.ndarray,
             q_weights: jnp.ndarray,
+            batch_stats: jnp.ndarray,
             x_data: jnp.ndarray,
             y_data: jnp.ndarray,
             training: bool
     ):
         """
-        Calculates the loss for a given set of weights, input data, and target data.
+        Calculates the loss for a given set of weights, batch stats, input data, and target data.
 
         Args:
-           c_weights: Parameters of the classical model.
+            c_weights: Parameters of the classical model.
             q_weights: Parameters of the quantum model.
+            batch_stats: Batch statistics for batch normalization.
             x_data: Input data for the model.
             y_data: Target data for training.
+            training: Boolean flag indicating if loss calculation is during training.
 
         Returns:
             Computed loss value.
@@ -665,26 +805,27 @@ class HybridOptimizer(Optimizer):
         outs = self._model(
             c_weights=c_weights,
             q_weights=q_weights,
+            batch_stats=batch_stats,
             x_data=x_data,
-            batch_stats=self._batch_stats,
             training=training
         )
 
-        if self._batch_stats and training:
-            predictions, self._batch_stats = outs
+        if batch_stats and training:
+            predictions, batch_stats = outs
         else:
             predictions = outs
 
         predictions = jnp.array(predictions).T
         loss_val = self._loss_fn(predictions, y_data).mean()
 
-        return loss_val
+        return loss_val, batch_stats
 
     @jax.jit
     def _update_step(
             self,
             c_params: jnp.ndarray,
             q_params: jnp.ndarray,
+            batch_stats: jnp.ndarray,
             c_opt_state: OptimizerState,
             q_opt_state: OptimizerState,
             data: jnp.ndarray,
@@ -696,32 +837,37 @@ class HybridOptimizer(Optimizer):
         Args:
             c_params: Classical model parameters.
             q_params: Quantum model parameters.
-            c_opt_state: Pytree representing the optimizer state to be updated.
-            q_opt_state:
+            batch_stats: Batch statistics for batch normalization.
+            c_opt_state: Pytree representing the classical optimizer state.
+            q_opt_state: Pytree representing the quantum optimizer state.
             data: Input data.
             targets: Target data.
 
         Returns:
             Updated parameters, optimizer state, and loss value.
         """
-        loss_val, (c_grads, q_grads) = jax.value_and_grad(
-            self._calculate_loss, argnums=(0, 1))(c_params, q_params, data, targets, True)
+        (loss_val, batch_stats), (c_grads, q_grads) = jax.value_and_grad(
+            self._calculate_loss,
+            argnums=(0, 1),
+            has_aux=True
+        )(c_params, q_params, batch_stats, data, targets, True)
 
         # Classical model parameters update
-        c_updates, c_opt_state = self._c_opt.update(c_grads, c_opt_state)
+        c_updates, c_opt_state = self._c_opt.update(c_grads, c_opt_state, c_params)
         c_params = optax.apply_updates(c_params, c_updates)
 
         # Quantum model parameters update
-        q_updates, q_opt_state = self._q_opt.update(q_grads, q_opt_state)
+        q_updates, q_opt_state = self._q_opt.update(q_grads, q_opt_state, q_params)
         q_params = optax.apply_updates(q_params, q_updates)
 
-        return c_params, q_params, c_opt_state, q_opt_state, loss_val
+        return c_params, q_params, batch_stats, c_opt_state, q_opt_state, loss_val
 
     @jax.jit
     def _validation_step(
             self,
             c_params: jnp.ndarray,
             q_params: jnp.ndarray,
+            batch_stats: jnp.ndarray,
             data: jnp.ndarray,
             targets: jnp.ndarray
     ):
@@ -731,6 +877,7 @@ class HybridOptimizer(Optimizer):
         Args:
             c_params: Classical model parameters.
             q_params: Quantum model parameters.
+            batch_stats: Batch statistics for batch normalization.
             data: Input data.
             targets: Target data.
 
@@ -738,7 +885,7 @@ class HybridOptimizer(Optimizer):
             Loss value for the given data and targets.
         """
         return self._calculate_loss(
-            c_weights=c_params, q_weights=q_params,
+            c_weights=c_params, q_weights=q_params, batch_stats=batch_stats,
             x_data=data, y_data=targets, training=False
         )
 
@@ -747,7 +894,17 @@ class HybridOptimizer(Optimizer):
             self,
             c_opt_state: OptimizerState,
             q_opt_state: OptimizerState
-    ):
+    ) -> Tuple[float, OptimizerState, OptimizerState]:
+        """
+        Performs a single training epoch.
+
+        Args:
+            c_opt_state: Current state of the classical optimizer.
+            q_opt_state: Current state of the quantum optimizer.
+
+        Returns:
+            Average training loss for the epoch and optimizers states.
+        """
         total_loss, num_batches = 0.0, 0
 
         # Process each batch
@@ -755,10 +912,11 @@ class HybridOptimizer(Optimizer):
             # Update parameters and optimizer states, calculate batch loss
             x_batch, y_batch = jnp.array(x_batch), jnp.array(y_batch)
             update_args = (
-                self._c_params, self._q_params, c_opt_state, q_opt_state, x_batch, y_batch
+                self._c_params, self._q_params, self._batch_stats,
+                c_opt_state, q_opt_state, x_batch, y_batch
             )
-            self._c_params, self._q_params, c_opt_state, q_opt_state, loss = self._update_step(
-                *update_args)
+            (self._c_params, self._q_params, self._batch_stats, c_opt_state, q_opt_state, loss
+             ) = self._update_step(*update_args)
 
             # Accumulate total loss and count the batch
             total_loss += loss
@@ -770,14 +928,20 @@ class HybridOptimizer(Optimizer):
         return average_loss, c_opt_state, q_opt_state
 
     def _perform_validation_epoch(self) -> float:
+        """
+        Performs a validation step.
+
+        Returns:
+            Average validation loss.
+        """
         total_loss, num_batches = 0.0, 0
 
         # Process each batch
         for x_batch, y_batch in iter(self._val_loader):
             # Calculate batch loss
             x_batch, y_batch = jnp.array(x_batch), jnp.array(y_batch)
-            batch_loss = self._validation_step(
-                self._c_params, self._q_params, x_batch, y_batch)
+            batch_loss, self._batch_stats = self._validation_step(
+                self._c_params, self._q_params, self._batch_stats, x_batch, y_batch)
 
             # Accumulate total loss and count the batch
             total_loss += batch_loss
@@ -798,7 +962,21 @@ class HybridOptimizer(Optimizer):
             epochs_num: int,
             verbose: bool
     ) -> None:
+        """
+        Executes the optimization loop for training and validating the hybrid model.
 
+        Args:
+            train_data: The training dataset. This can be in the form of a DataLoader, which directly
+                provides batches of data, or a NumPy array or PyTorch tensor, from which a DataLoader will be created.
+            train_targets: The target labels or values for the training data. Required if `train_data` is not
+                a DataLoader. If `train_data` is a DataLoader, this should be None.
+            val_data: The validation dataset. Similar to `train_data`, this can be a DataLoader, a NumPy
+                array, or a PyTorch tensor.
+            val_targets: The target labels or values for the validation data. Required if `val_data` is not
+                a DataLoader. If `val_data` is a DataLoader, this should be None.
+            epochs_num: The number of epochs to run the optimization loop.
+            verbose: Boolean flag indicating whether to print training progress.
+        """
         self._train_loader, self._val_loader = self._set_dataloaders(
             train_data=train_data,
             train_targets=train_targets,
@@ -806,6 +984,8 @@ class HybridOptimizer(Optimizer):
             val_targets=val_targets
         )
 
+        self._c_opt = optax.chain(optax.clip(1.0), self._c_opt)
+        self._q_opt = optax.chain(optax.clip(1.0), self._q_opt)
         c_opt_state = self._c_opt.init(self._c_params)
         q_opt_state = self._q_opt.init(self._q_params)
 
@@ -818,7 +998,8 @@ class HybridOptimizer(Optimizer):
                 self._best_model_checkpoint.update(
                     current_val_loss=val_loss,
                     current_c_params=self._c_params,
-                    current_q_params=self._q_params
+                    current_q_params=self._q_params,
+                    current_batch_stats=self._batch_stats
                 )
 
             # Early stopping logic
