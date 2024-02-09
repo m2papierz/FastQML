@@ -86,9 +86,9 @@ class BestModelCheckpoint:
 
     def update(
             self,
-            current_q_params: jnp.ndarray,
             current_val_loss: float,
-            current_c_params: jnp.ndarray = None
+            current_c_params: jnp.ndarray = None,
+            current_q_params: jnp.ndarray = None,
     ) -> None:
         """
         Updates the best model parameters if the current validation loss is lower.
@@ -99,7 +99,8 @@ class BestModelCheckpoint:
             current_c_params: Optional current C model parameters.
         """
         if current_val_loss < self.best_val_loss:
-            self.best_q_params = current_q_params
+            if current_q_params is not None:
+                self.best_q_params = current_q_params
             if current_c_params is not None:
                 self.best_c_params = current_c_params
             self.best_val_loss = current_val_loss
