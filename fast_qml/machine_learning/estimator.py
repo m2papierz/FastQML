@@ -29,18 +29,21 @@ from fast_qml.core.optimizer import (
 
 class QuantumEstimator:
     """
-    Base class for creating quantum estimators.
+    Provides a framework for implementing quantum machine learning estimators.
 
-    This class provides a framework for quantum machine learning models,
-    and is intended to be subclassed for specific implementations.
+    This base class is designed for the creation of quantum estimators, facilitating the integration of quantum
+    circuits with machine learning algorithms. It is intended to be subclassed for specific quantum model
+    implementations, where the quantum circuit is defined by a feature map, an ansatz, and a measurement operation.
 
     Args:
-        n_qubits: Number of qubits in the quantum circuit.
+        n_qubits: The number of qubits in the quantum circuit.
         feature_map: The feature map for encoding classical data into quantum states.
-        ansatz: The variational form (ansatz) for the quantum circuit.
-        measurement_op: The measurement operator or observable used in the circuit.
-        loss_fn: The loss function used for core.
-        measurements_num: Number of wires on which to run measurements.
+        ansatz: The variational form for the quantum circuit.
+        measurement_op: The measurement operator or observable used to measure the quantum state.
+        loss_fn: The loss function used to evaluate the model's predictions against the true outcomes.
+        optimizer: The optimization algorithm.
+        measurements_num: The number of wires on which to perform measurements.
+
     """
     def __init__(
             self,
@@ -131,7 +134,8 @@ class QuantumEstimator:
             batch_stats=None,
             model=self.q_model,
             loss_fn=self.loss_fn,
-            optimizer=self._optimizer(learning_rate),
+            c_optimizer=None,
+            q_optimizer=self._optimizer(learning_rate),
             batch_size=batch_size,
             early_stopping=early_stopping
         )
@@ -149,6 +153,20 @@ class QuantumEstimator:
 
 
 class ClassicalEstimator:
+    """
+    Base class for creating classical machine learning estimators based on Flax models.
+
+    This class provides a structured framework for defining and training classical machine learning models,
+    particularly those based on neural networks. It should be subclassed to implement specific model
+    architectures and functionalities.
+
+    Args:
+        input_shape: The shape of the input data.
+        c_model: The classical Flax neural network to be trained.
+        loss_fn: The loss function used to evaluate the model's performance.
+        optimizer: The optimization algorithm.
+        batch_norm: Indicates whether batch normalization is used within the model.
+    """
     def __init__(
             self,
             input_shape: Union[int, Tuple[int]],
@@ -171,10 +189,10 @@ class ClassicalEstimator:
     def _initialize_parameters(
             self,
             input_shape: Union[int, Tuple[int]],
-            batch_norm: bool = False
+            batch_norm: bool
     ) -> Dict[str, Any]:
         """
-        Initializes parameters for the classical and quantum models.
+        Initializes parameters for the classical model.
         """
         raise NotImplementedError("Subclasses must implement this method.")
 
@@ -203,6 +221,26 @@ class ClassicalEstimator:
             early_stopping: EarlyStopping = None,
             verbose: bool = True
     ) -> None:
+        """
+        Trains the classical neural network estimator on the provided dataset.
+
+        This method optimizes the weights of the variational circuit using the specified loss function
+        and optimizer. It updates the weights based on the training data over a number of epochs.
+
+        Args:
+            train_data: Input features for training.
+            train_targets: Target outputs for training.
+            val_data: Input features for validation.
+            val_targets: Target outputs for validation.
+            learning_rate: Learning rate for the optimizer.
+            num_epochs: Number of epochs to run the training.
+            batch_size: Size of batches for training. If None, the whole dataset is used in each iteration.
+            early_stopping: Instance of EarlyStopping to be used during training.
+            verbose : If True, prints verbose messages during training.
+
+        If early stopping is configured and validation data is provided, the training process will
+        stop early if no improvement is seen in the validation loss for a specified number of epochs.
+        """
         if self._batch_norm:
             weights, batch_stats = (
                 self._params['weights'], self._params['batch_stats'])
@@ -215,7 +253,8 @@ class ClassicalEstimator:
             batch_stats=batch_stats,
             model=self._model,
             loss_fn=self._loss_fn,
-            optimizer=self._optimizer(learning_rate),
+            c_optimizer=self._optimizer(learning_rate),
+            q_optimizer=None,
             batch_size=batch_size,
             early_stopping=early_stopping
         )
@@ -230,9 +269,25 @@ class ClassicalEstimator:
         )
 
         self._params['weights'] = optimizer.weights
+        self._params['batch_stats'] = optimizer.batch_stats
 
 
 class HybridEstimator:
+    """
+    Provides a framework for creating hybrid quantum-classical machine learning estimators.
+
+    This base class facilitates the integration of classical neural network models with quantum circuits to form
+    hybrid models. It enables the use of quantum circuits as components within a larger classical model architecture
+    or vice versa, aiming to leverage the strengths of both quantum and classical approaches.
+
+    Args:
+        input_shape: The shape of the input data for the classical component of the hybrid model.
+        c_model: The classical model component.
+        q_model: The quantum model component, defined as an instance of a QuantumEstimator subclass.
+        loss_fn: The loss function for evaluating the hybrid model's performance.
+        optimizer: The optimization algorithm.
+        batch_norm: Indicates the use of batch normalization in the classical component of the model.
+    """
     def __init__(
             self,
             input_shape,
@@ -257,7 +312,7 @@ class HybridEstimator:
     def _initialize_parameters(
             self,
             input_shape: Union[int, Tuple[int]],
-            batch_norm: bool = False
+            batch_norm: bool
     ) -> Dict[str, Any]:
         """
         Initializes weights for the classical and quantum models.
@@ -290,7 +345,26 @@ class HybridEstimator:
             early_stopping: EarlyStopping = None,
             verbose: bool = True
     ) -> None:
+        """
+        Trains the hybrid quantum-classical estimator on the provided dataset.
 
+        This method optimizes the weights of the variational circuit using the specified loss function
+        and optimizer. It updates the weights based on the training data over a number of epochs.
+
+        Args:
+            train_data: Input features for training.
+            train_targets: Target outputs for training.
+            val_data: Input features for validation.
+            val_targets: Target outputs for validation.
+            learning_rate: Learning rate for the optimizer.
+            num_epochs: Number of epochs to run the training.
+            batch_size: Size of batches for training. If None, the whole dataset is used in each iteration.
+            early_stopping: Instance of EarlyStopping to be used during training.
+            verbose : If True, prints verbose messages during training.
+
+        If early stopping is configured and validation data is provided, the training process will
+        stop early if no improvement is seen in the validation loss for a specified number of epochs.
+        """
         if self._batch_norm:
             c_weights, batch_stats = (
                 self._params['c_weights'], self._params['batch_stats'])
@@ -304,7 +378,8 @@ class HybridEstimator:
             batch_stats=batch_stats,
             model=self._model,
             loss_fn=self._q_model.loss_fn,
-            optimizer=self._optimizer(learning_rate),
+            c_optimizer=self._optimizer(learning_rate),
+            q_optimizer=self._optimizer(learning_rate),
             batch_size=batch_size,
             early_stopping=early_stopping
         )
@@ -319,3 +394,4 @@ class HybridEstimator:
         )
 
         self._params['c_weights'], self._params['q_weights'] = optimizer.weights
+        self._params['batch_stats'] = optimizer.batch_stats
