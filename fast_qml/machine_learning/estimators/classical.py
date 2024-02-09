@@ -8,7 +8,6 @@
 #
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
-from abc import abstractmethod
 from typing import (
     Callable, Union, Any, Tuple, Dict, Mapping)
 
@@ -59,7 +58,10 @@ class ClassicalModel(ClassicalEstimator):
                 'batch_stats': variables['batch_stats']
             }
         else:
-            return self._c_model.init(self._init_rng, c_inp)
+            variables = self._c_model.init(self._init_rng, c_inp)
+            return {
+                'weights': variables['params']
+            }
 
     def _model(
             self,
@@ -88,7 +90,7 @@ class ClassicalModel(ClassicalEstimator):
                 else:
                     c_out = self._c_model.apply(
                         {'params': weights, 'batch_stats': batch_stats},
-                        x_data, train=training, mutable=False)
+                        x_data, train=training)
                     return jax.numpy.array(c_out)
             else:
                 c_out = self._c_model.apply({'params': weights}, x_data)
@@ -126,7 +128,7 @@ class ClassicalRegressor(ClassicalModel):
             weights, batch_stats = (
                 self._params['weights'], self._params['batch_stats'])
         else:
-            weights, batch_stats = self._params, None
+            weights, batch_stats = self._params['weights'], None
 
         return jnp.array(
             self._model(
@@ -142,7 +144,7 @@ class ClassicalClassifier(ClassicalModel):
             c_model: nn.Module,
             loss_fn: Callable,
             batch_norm: bool,
-            classes_num: int
+            num_classes: int
     ):
         super().__init__(
             input_shape=input_shape,
@@ -151,7 +153,7 @@ class ClassicalClassifier(ClassicalModel):
             batch_norm=batch_norm
         )
 
-        self.classes_num = classes_num
+        self.num_classes = num_classes
 
     def predict_proba(
             self,
@@ -173,18 +175,17 @@ class ClassicalClassifier(ClassicalModel):
             weights, batch_stats = (
                 self._params['weights'], self._params['batch_stats'])
         else:
-            weights, batch_stats = self._params, None
+            weights, batch_stats = self._params['weights'], None
 
-        logits = jnp.array(
-            self._model(
-                weights=weights, x_data=x,
-                batch_stats=batch_stats, training=False)
-        ).ravel()
+        logits = self._model(
+            weights=weights, x_data=x,
+            batch_stats=batch_stats, training=False
+        )
 
-        if self.classes_num == 2:
-            return logits.ravel()
+        if self.num_classes == 2:
+            return jnp.array(logits).ravel()
         else:
-            return logits.T
+            return jnp.array(logits)
 
     def predict(
             self,
@@ -209,7 +210,7 @@ class ClassicalClassifier(ClassicalModel):
         """
         logits = self.predict_proba(x)
 
-        if self.classes_num == 2:
+        if self.num_classes == 2:
             return jnp.where(logits >= threshold, 1, 0)
         else:
             return jnp.argmax(logits, axis=1)
