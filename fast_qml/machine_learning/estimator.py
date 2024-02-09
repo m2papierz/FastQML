@@ -13,19 +13,20 @@ from typing import (
     Callable, Union, Any, Tuple, Dict, Mapping)
 
 import jax
+import torch
 import flax.linen as nn
 import numpy as np
 import pennylane as qml
 from jax import numpy as jnp
+from torch.utils.data import DataLoader
 
 from fast_qml.quantum_circuits.feature_maps import FeatureMap
 from fast_qml.quantum_circuits.variational_forms import VariationalForm
-from fast_qml.machine_learning.loss_functions import MSELoss
-from fast_qml.optimization.callbacks import EarlyStopping
-from fast_qml.machine_learning.optimizer import (
-    ClassicalOptimizer, HybridOptimizer)
+from fast_qml.core.callbacks import EarlyStopping
+from fast_qml.machine_learning.optimizer import HybridOptimizer
 
-from fast_qml.optimization.opt_quantum import QuantumOptimizer
+from fast_qml.core.optimizer import QuantumOptimizer
+from fast_qml.core.opt_classical import ClassicalOptimizer
 
 
 class QuantumEstimator:
@@ -40,20 +41,16 @@ class QuantumEstimator:
         feature_map: The feature map for encoding classical data into quantum states.
         ansatz: The variational form (ansatz) for the quantum circuit.
         measurement_op: The measurement operator or observable used in the circuit.
-        loss_fn: The loss function used for optimization.
+        loss_fn: The loss function used for core.
         measurements_num: Number of wires on which to run measurements.
-
-    Attributes:
-        _optimizer: The optimizer used for training the quantum circuit.
-        _device: The quantum device on which the circuit will be executed.
     """
     def __init__(
             self,
             n_qubits: int,
             feature_map: FeatureMap,
             ansatz: VariationalForm,
+            loss_fn: Callable,
             measurement_op: Callable = qml.PauliZ,
-            loss_fn: Callable = MSELoss(),
             measurements_num: int = 1
     ):
         # Validate measurement operation
@@ -69,8 +66,6 @@ class QuantumEstimator:
 
         self._device = qml.device(
             name="default.qubit.jax", wires=self._n_qubits)
-        self._optimizer = QuantumOptimizer
-
         self.weights = self._initialize_weights()
 
     @staticmethod
@@ -90,8 +85,8 @@ class QuantumEstimator:
     @abstractmethod
     def q_model(
             self,
-            weights: np.ndarray,
-            x_data: np.ndarray
+            weights: jnp.ndarray,
+            x_data: jnp.ndarray
     ) -> qml.qnode:
         """
         Define and apply the quantum model for the variational estimator.
@@ -100,10 +95,10 @@ class QuantumEstimator:
 
     def fit(
             self,
-            x_train: np.ndarray,
-            y_train: np.ndarray,
-            x_val: np.ndarray = None,
-            y_val: np.ndarray = None,
+            train_data: Union[np.ndarray, torch.Tensor, DataLoader],
+            val_data: Union[np.ndarray, torch.Tensor, DataLoader],
+            train_targets: Union[np.ndarray, torch.Tensor, None] = None,
+            val_targets: Union[np.ndarray, torch.Tensor, None] = None,
             learning_rate: float = 0.01,
             num_epochs: int = 500,
             batch_size: int = None,
@@ -117,10 +112,10 @@ class QuantumEstimator:
         and optimizer. It updates the weights based on the training data over a number of epochs.
 
         Args:
-            x_train: Input features for training.
-            y_train: Target outputs for training.
-            x_val: Input features for validation.
-            y_val: Target outputs for validation.
+            train_data: Input features for training.
+            train_targets: Target outputs for training.
+            val_data: Input features for validation.
+            val_targets: Target outputs for validation.
             learning_rate: Learning rate for the optimizer.
             num_epochs: Number of epochs to run the training.
             batch_size: Size of batches for training. If None, the whole dataset is used in each iteration.
@@ -130,7 +125,7 @@ class QuantumEstimator:
         If early stopping is configured and validation data is provided, the training process will
         stop early if no improvement is seen in the validation loss for a specified number of epochs.
         """
-        optimizer = self._optimizer(
+        optimizer = QuantumOptimizer(
             c_params=None,
             q_params=self.weights,
             batch_stats=None,
@@ -142,10 +137,10 @@ class QuantumEstimator:
         )
 
         optimizer.optimize(
-            train_data=x_train,
-            train_targets=y_train,
-            val_data=x_val,
-            val_targets=y_val,
+            train_data=train_data,
+            train_targets=train_targets,
+            val_data=val_data,
+            val_targets=val_targets,
             epochs_num=num_epochs,
             verbose=verbose
         )
@@ -158,64 +153,48 @@ class ClassicalEstimator:
             self,
             input_shape: Union[int, Tuple[int]],
             c_model: nn.Module,
-            loss_fn: Callable = MSELoss()
+            loss_fn: Callable,
+            batch_norm: bool
     ):
         self._c_model = c_model
-        self._optimizer = ClassicalOptimizer
         self._loss_fn = loss_fn
+        self._batch_norm = batch_norm
 
         self._inp_rng, self._init_rng = jax.random.split(
             jax.random.PRNGKey(seed=42), num=2)
-        self._weights = self._initialize_weights(input_shape)
+        self._params = self._initialize_parameters(
+            input_shape=input_shape, batch_norm=batch_norm)
 
-    def _initialize_weights(
+    @abstractmethod
+    def _initialize_parameters(
             self,
-            input_shape: Union[int, Tuple[int]]
+            input_shape: Union[int, Tuple[int]],
+            batch_norm: bool = False
     ) -> Dict[str, Any]:
         """
-        Initializes weights for the classical and quantum models.
-
-        Args:
-            input_shape: The shape of the input data.
-
-        Returns:
-            A dictionary containing initialized weights for both classical and quantum models.
+        Initializes parameters for the classical and quantum models.
         """
-        if not all(isinstance(dim, int) for dim in input_shape):
-            raise ValueError("input_shape must be a tuple or list of integers.")
+        raise NotImplementedError("Subclasses must implement this method.")
 
-        c_inp = jax.random.normal(self._inp_rng, shape=(1, *input_shape))
-        c_weights = self._c_model.init(self._init_rng, c_inp, train=True)
-        return c_weights
-
+    @abstractmethod
     def _model(
             self,
             weights: Dict[str, Mapping[str, jnp.ndarray]],
-            x_data: jnp.ndarray
+            x_data: jnp.ndarray,
+            batch_stats: Union[Dict[str, Mapping[str, jnp.ndarray]], None],
+            training: bool
     ):
         """
         Defines the classical model inference.
-
-        Args:
-            weights: Weights of the classical model.
-            x_data: Input data for the model.
-
-        Returns:
-            The output of the hybrid model.
         """
-
-        def _classical_model():
-            c_out = self._c_model.apply(weights, x_data)
-            return jax.numpy.array(c_out)
-
-        return _classical_model()
+        raise NotImplementedError("Subclasses must implement this method.")
 
     def fit(
             self,
-            x_train: jnp.ndarray,
-            y_train: jnp.ndarray,
-            x_val: jnp.ndarray = None,
-            y_val: jnp.ndarray = None,
+            train_data: np.ndarray,
+            train_targets: np.ndarray,
+            val_data: np.ndarray,
+            val_targets: np.ndarray,
             learning_rate: float = 0.01,
             num_epochs: int = 500,
             batch_size: int = None,
@@ -229,10 +208,10 @@ class ClassicalEstimator:
         and optimizer. It updates the weights based on the training data over a number of epochs.
 
         Args:
-            x_train: Input features for training.
-            y_train: Target outputs for training.
-            x_val: Input features for validation.
-            y_val: Target outputs for validation.
+            train_data: Input features for training.
+            train_targets: Target outputs for training.
+            val_data: Input features for validation.
+            val_targets: Target outputs for validation.
             learning_rate: Learning rate for the optimizer.
             num_epochs: Number of epochs to run the training.
             batch_size: Size of batches for training. If None, the whole dataset is used in each iteration.
@@ -242,26 +221,33 @@ class ClassicalEstimator:
         If early stopping is configured and validation data is provided, the training process will
         stop early if no improvement is seen in the validation loss for a specified number of epochs.
         """
-        optimizer = self._optimizer(
-            c_params=self._weights,
+        if self._batch_norm:
+            weights, batch_stats = (
+                self._params['weights'], self._params['batch_stats'])
+        else:
+            weights, batch_stats = self._params, None
+
+        optimizer = ClassicalOptimizer(
+            c_params=weights,
             q_params=None,
+            batch_stats=batch_stats,
             model=self._model,
             loss_fn=self._loss_fn,
             batch_size=batch_size,
-            epochs_num=num_epochs,
             learning_rate=learning_rate,
             early_stopping=early_stopping
         )
 
         optimizer.optimize(
-            x_train=jnp.array(x_train),
-            y_train=jnp.array(y_train),
-            x_val=jnp.array(x_val),
-            y_val=jnp.array(y_val),
+            train_data=train_data,
+            train_targets=train_targets,
+            val_data=val_data,
+            val_targets=val_targets,
+            epochs_num=num_epochs,
             verbose=verbose
         )
 
-        self._weights = optimizer.weights
+        self._params['weights'] = optimizer.weights
 
 
 class HybridEstimator:
@@ -284,7 +270,6 @@ class HybridEstimator:
         c_model: The classical neural network model.
         q_model: The quantum model.
     """
-
     def __init__(
             self,
             input_shape,
@@ -337,7 +322,6 @@ class HybridEstimator:
         Returns:
             The output of the hybrid model.
         """
-
         def _hybrid_model():
             c_out = self._c_model.apply(c_weights, x_data)
             c_out = jax.numpy.array(c_out)
