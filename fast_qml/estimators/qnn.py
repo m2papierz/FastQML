@@ -31,7 +31,7 @@ from jax import numpy as jnp
 
 from fast_qml.quantum_circuits.feature_maps import FeatureMap, AmplitudeEmbedding
 from fast_qml.quantum_circuits.variational_forms import VariationalForm
-from fast_qml.machine_learning.estimator import QuantumEstimator
+from fast_qml.core.estimator import QuantumEstimator
 
 
 class QNN(QuantumEstimator):

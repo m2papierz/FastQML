@@ -15,7 +15,7 @@ import jax
 import flax.linen as nn
 from jax import numpy as jnp
 
-from fast_qml.machine_learning.estimator import ClassicalEstimator
+from fast_qml.core.estimator import ClassicalEstimator
 
 class ClassicalModel(ClassicalEstimator):
     """

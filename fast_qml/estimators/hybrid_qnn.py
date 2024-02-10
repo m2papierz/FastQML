@@ -15,9 +15,9 @@ import jax
 import flax.linen as nn
 from jax import numpy as jnp
 
-from fast_qml.machine_learning.estimator import HybridEstimator
-from fast_qml.machine_learning.estimators.qnn import QNNRegressor, QNNClassifier
-from fast_qml.machine_learning.estimators.vqa import VQRegressor, VQClassifier
+from fast_qml.core.estimator import HybridEstimator
+from fast_qml.estimators.qnn import QNNRegressor, QNNClassifier
+from fast_qml.estimators.vqa import VQRegressor, VQClassifier
 
 
 class HybridModel(HybridEstimator):
