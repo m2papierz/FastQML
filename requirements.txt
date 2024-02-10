@@ -4,4 +4,5 @@ pennylane~=0.34.0
 jax~=0.4.23
 optax~=0.1.8
 flax~=0.8.0
-setuptools~=68.2.2
+setuptools~=68.2.0
+torch~=2.2.0
