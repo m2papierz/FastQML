@@ -150,9 +150,11 @@ class AmplitudeEmbedding(FeatureMap):
 class IQPEmbedding(FeatureMap):
     def __init__(
             self,
-            n_qubits: int
+            n_qubits: int,
+            n_repeats: int = 1
     ):
         super().__init__(n_qubits=n_qubits)
+        self._n_repeats = n_repeats
 
     def _set_map_func(
             self,
@@ -167,7 +169,8 @@ class IQPEmbedding(FeatureMap):
         def map_func():
             qml.IQPEmbedding(
                 features=features,
-                wires=range(self._n_qubits)
+                wires=range(self._n_qubits),
+                n_repeats=self._n_repeats
             )
         return map_func()
 
