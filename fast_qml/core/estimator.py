@@ -63,7 +63,7 @@ class QuantumEstimator:
         self._feature_map = feature_map
         self._ansatz = ansatz
         self.loss_fn = loss_fn
-        self._optimizer = optimizer
+        self.optimizer = optimizer
         self._measurement_op = measurement_op
         self._measurements_num = measurements_num
 
@@ -135,7 +135,7 @@ class QuantumEstimator:
             model=self.q_model,
             loss_fn=self.loss_fn,
             c_optimizer=None,
-            q_optimizer=self._optimizer(learning_rate),
+            q_optimizer=self.optimizer(learning_rate),
             batch_size=batch_size,
             early_stopping=early_stopping
         )
@@ -284,8 +284,6 @@ class HybridEstimator:
         input_shape: The shape of the input data for the classical component of the hybrid model.
         c_model: The classical model component.
         q_model: The quantum model component, defined as an instance of a QuantumEstimator subclass.
-        loss_fn: The loss function for evaluating the hybrid model's performance.
-        optimizer: The optimization algorithm.
         batch_norm: Indicates the use of batch normalization in the classical component of the model.
     """
     def __init__(
@@ -293,14 +291,12 @@ class HybridEstimator:
             input_shape,
             c_model: nn.Module,
             q_model: QuantumEstimator,
-            loss_fn: Callable,
-            optimizer: Callable,
             batch_norm: bool
     ):
         self._c_model = c_model
         self._q_model = q_model
-        self._loss_fn = loss_fn
-        self._optimizer = optimizer
+        self._loss_fn = q_model.loss_fn
+        self._optimizer = q_model.optimizer
         self._batch_norm = batch_norm
 
         self._inp_rng, self._init_rng = jax.random.split(

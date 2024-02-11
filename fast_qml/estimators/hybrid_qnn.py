@@ -9,7 +9,7 @@
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
 from typing import (
-    Union, Dict, Any, Tuple, Callable, Mapping)
+    Union, Dict, Any, Tuple, Mapping)
 
 import jax
 import flax.linen as nn
@@ -36,8 +36,6 @@ class HybridModel(HybridEstimator):
         input_shape: The shape of the input data for the classical component of the hybrid model.
         c_model: The classical model component.
         q_model: The quantum model component, defined as an instance of a QuantumEstimator subclass.
-        loss_fn: The loss function for evaluating the hybrid model's performance.
-        optimizer: The optimization algorithm.
         batch_norm: Indicates the use of batch normalization in the classical component of the model.
     """
     def __init__(
@@ -45,16 +43,12 @@ class HybridModel(HybridEstimator):
             input_shape,
             c_model: nn.Module,
             q_model: Union[VQRegressor, VQClassifier, QNNRegressor, QNNClassifier],
-            loss_fn: Callable,
-            optimizer: Callable,
             batch_norm: bool
     ):
         super().__init__(
             input_shape=input_shape,
             c_model=c_model,
             q_model=q_model,
-            loss_fn=loss_fn,
-            optimizer=optimizer,
             batch_norm=batch_norm
         )
 
@@ -151,8 +145,6 @@ class HybridRegressor(HybridModel):
         input_shape: The shape of the input data.
         c_model: The classical neural network model.
         q_model: The quantum regression model.
-        loss_fn: The loss function used to evaluate the model.
-        optimizer: The optimization algorithm.
         batch_norm: Indicates whether batch normalization is used within the model.
     """
     def __init__(
@@ -160,16 +152,12 @@ class HybridRegressor(HybridModel):
             input_shape,
             c_model: nn.Module,
             q_model: Union[VQRegressor, QNNRegressor],
-            loss_fn: Callable,
-            optimizer: Callable,
             batch_norm: bool
     ):
         super().__init__(
             input_shape=input_shape,
             c_model=c_model,
             q_model=q_model,
-            loss_fn=loss_fn,
-            optimizer=optimizer,
             batch_norm=batch_norm
         )
 
@@ -208,8 +196,6 @@ class HybridClassifier(HybridModel):
         input_shape: The shape of the input data.
         c_model: The classical neural network model.
         q_model: The quantum classifier model.
-        loss_fn: The loss function used to evaluate the model.
-        optimizer: The optimization algorithm.
         batch_norm: Indicates whether batch normalization is used within the model.
     """
     def __init__(
@@ -217,16 +203,12 @@ class HybridClassifier(HybridModel):
             input_shape,
             c_model: nn.Module,
             q_model: Union[VQClassifier, QNNClassifier],
-            loss_fn: Callable,
-            optimizer: Callable,
             batch_norm: bool
     ):
         super().__init__(
             input_shape=input_shape,
             c_model=c_model,
             q_model=q_model,
-            loss_fn=loss_fn,
-            optimizer=optimizer,
             batch_norm=batch_norm
         )
 
