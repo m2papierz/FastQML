@@ -89,8 +89,13 @@ class QNN(QuantumEstimator):
         Initialize weights for the quantum circuit.
         """
         key = jax.random.PRNGKey(42)
-        weights = 0.1 * jax.random.normal(
-            key, shape=(self._layers_num, self._ansatz.params_num))
+        params_shape = self._ansatz.params_num
+        if isinstance(params_shape, int):
+            weights = 0.1 * jax.random.normal(
+                key, shape=(self._layers_num, self._ansatz.params_num))
+        else:
+            weights = 0.1 * jax.random.normal(
+                key, shape=(self._layers_num, *self._ansatz.params_num))
         return weights
 
     def _quantum_layer(

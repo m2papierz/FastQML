@@ -70,8 +70,13 @@ class VariationalQuantumEstimator(QuantumEstimator):
         """
         Initialize weights for the quantum circuit.
         """
-        weights = 0.1 * jax.random.normal(
-            key=jax.random.PRNGKey(42), shape=[self._ansatz.params_num])
+        params_shape = self._ansatz.params_num
+        if isinstance(params_shape, int):
+            weights = 0.1 * jax.random.normal(
+                jax.random.PRNGKey(42), shape=[self._ansatz.params_num])
+        else:
+            weights = 0.1 * jax.random.normal(
+                jax.random.PRNGKey(42), shape=[*self._ansatz.params_num])
         return weights
 
     def _quantum_layer(
