@@ -405,7 +405,6 @@ class EfficientSU2(TwoLocal):
     >>> from fast_qml.quantum_circuits.variational_forms import EfficientSU2
 
     # Create an instance of the EfficientSU2 class
-
     >>> su2 = EfficientSU2(
     ...     n_qubits=3,
     ...     rotation_blocks=['RX', 'RY'],
