@@ -178,7 +178,7 @@ class ClassicalEstimator:
         self._c_model = c_model
         self._loss_fn = loss_fn
         self._optimizer = optimizer
-        self._batch_norm = batch_norm
+        self.batch_norm = batch_norm
 
         self._inp_rng, self._init_rng = jax.random.split(
             jax.random.PRNGKey(seed=42), num=2)
@@ -241,7 +241,7 @@ class ClassicalEstimator:
         If early stopping is configured and validation data is provided, the training process will
         stop early if no improvement is seen in the validation loss for a specified number of epochs.
         """
-        if self._batch_norm:
+        if self.batch_norm:
             weights, batch_stats = (
                 self._params['weights'], self._params['batch_stats'])
         else:
@@ -284,25 +284,23 @@ class HybridEstimator:
         input_shape: The shape of the input data for the classical component of the hybrid model.
         c_model: The classical model component.
         q_model: The quantum model component, defined as an instance of a QuantumEstimator subclass.
-        batch_norm: Indicates the use of batch normalization in the classical component of the model.
     """
     def __init__(
             self,
             input_shape,
             c_model: nn.Module,
-            q_model: QuantumEstimator,
-            batch_norm: bool
+            q_model: QuantumEstimator
     ):
         self._c_model = c_model
         self._q_model = q_model
         self._loss_fn = q_model.loss_fn
         self._optimizer = q_model.optimizer
-        self._batch_norm = batch_norm
+        self._batch_norm = c_model.batch_norm
 
         self._inp_rng, self._init_rng = jax.random.split(
             jax.random.PRNGKey(seed=42), num=2)
         self._params = self._initialize_parameters(
-            input_shape=input_shape, batch_norm=batch_norm)
+            input_shape=input_shape, batch_norm=self._batch_norm)
 
     @abstractmethod
     def _initialize_parameters(

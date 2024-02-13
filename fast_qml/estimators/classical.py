@@ -102,7 +102,7 @@ class ClassicalModel(ClassicalEstimator):
             The output of the classical model.
         """
         def _classical_model():
-            if self._batch_norm:
+            if self.batch_norm:
                 if training:
                     c_out, updates = self._c_model.apply(
                         {'params': weights, 'batch_stats': batch_stats},
@@ -158,7 +158,7 @@ class ClassicalRegressor(ClassicalModel):
         Args:
             x: An array of input data.
         """
-        if self._batch_norm:
+        if self.batch_norm:
             weights, batch_stats = (
                 self._params['weights'], self._params['batch_stats'])
         else:
@@ -219,7 +219,7 @@ class ClassicalClassifier(ClassicalModel):
             a single probability for each sample. For multi-class classification, this will be a 2D array
             where each row corresponds to a sample and each column corresponds to a class.
         """
-        if self._batch_norm:
+        if self.batch_norm:
             weights, batch_stats = (
                 self._params['weights'], self._params['batch_stats'])
         else:
