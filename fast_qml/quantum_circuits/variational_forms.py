@@ -13,10 +13,11 @@ Module providing variational forms.
 """
 
 from abc import abstractmethod
-from typing import Any, Union, Callable
+from typing import Any, Union, Callable, List
 
 import pennylane as qml
 from jax import numpy as jnp
+from pennylane.ops.op_math.controlled import ControlledOp
 
 from fast_qml.quantum_circuits.utils import validate_function_args
 from fast_qml.quantum_circuits.entanglement import Entangler
@@ -460,8 +461,7 @@ class TreeTensor(VariationalForm):
     >>> import numpy as np
     >>> from fast_qml.quantum_circuits.variational_forms import TreeTensor
 
-    # Create an instance of the EfficientSU2 class
-
+    # Create an instance of the TreeTensor class
     >>> tree_tensor = TreeTensor(
     ...     n_qubits=4,
     ...     controlled_gate='CNOT',
@@ -548,3 +548,127 @@ class TreeTensor(VariationalForm):
         for r in range(self._reps):
             params_subset = params[r * block_params_n: (r + 1) * block_params_n]
             self._variational_func(params=params_subset)
+
+
+class StronglyEntanglingLayers(VariationalForm):
+    """
+    QLayers consisting of single qubit rotations and entanglers, inspired by the circuit-centric
+    classifier design: https://arxiv.org/abs/1804.00633.
+
+    Args:
+        n_qubits: Number of qubits in the quantum circuit.
+        controlled_gate: Controlled gate type. Defaults to 'CNOT'.
+        n_layers: Number of strongly entangling layers.
+        ranges: Sequence determining the range hyperparameter for each subsequent layer.
+
+    **Example**
+
+    # Import necessary libraries
+    >>> import numpy as np
+    >>> from fast_qml.quantum_circuits.variational_forms import StronglyEntanglingLayers
+
+    # Create an instance of the StronglyEntanglingLayers class
+    >>> strong_ent = TreeTensor(
+    ...     n_qubits=4,
+    ...     controlled_gate='CNOT',
+    ...     reps=2
+    ... )
+
+    # Create QNode
+    >>> @qml.qnode(qml.device("default.qubit"), wires=4)
+    >>> def circ(params)
+    ...     strong_ent.apply(params)
+    ...     return qml.expval(qml.PauliZ(0))
+
+    # Initialize randomly parameters and draw circuit
+    >>> params = np.random.randn(strong_ent.params_num)
+    >>> print(qml.draw(circ, expansion_strategy='device')(params))
+    0: ──Rot(-0.39,0.60,-0.15)─╭●───────╭X──Rot(-1.19,-1.06,-0.35)─╭●────╭X────┤  <Z>
+    1: ──Rot(0.95,0.58,-1.11)──╰X─╭●────│───Rot(0.87,-0.78,-0.92)──│──╭●─│──╭X─┤
+    2: ──Rot(0.58,-0.70,1.75)─────╰X─╭●─│───Rot(0.72,-0.37,-0.46)──╰X─│──╰●─│──┤
+    3: ──Rot(-1.36,-1.99,0.76)───────╰X─╰●──Rot(0.15,0.75,-0.12)──────╰X────╰●─┤
+    """
+    def __init__(
+            self,
+            n_qubits: int,
+            controlled_gate: str = 'CNOT',
+            n_layers: int = 1,
+            ranges: List[int] = None
+    ):
+        super().__init__(
+            n_qubits=n_qubits,
+            controlled_gate=controlled_gate,
+            reps=1
+        )
+
+        self._n_layers = n_layers
+        self._ranges = ranges
+        self._controlled_gate = self._get_controlled_gate(
+            c_gate=controlled_gate
+        )
+
+    @staticmethod
+    def _get_controlled_gate(
+            c_gate: str
+    ) -> Any:
+        """
+        Retrieves the controlled gate function based on the specified gate name.
+
+        Args:
+            c_gate: The name of the controlled gate.
+
+        Returns:
+            The controlled gate function.
+
+        Raises:
+            ValueError: If the specified gate is not a valid Pennylane controlled gate or if
+                the gate attribute does not exist.
+        """
+        try:
+            gate_function = getattr(qml, c_gate)
+            if not issubclass(gate_function, ControlledOp) and c_gate != 'CNOT':
+                raise ValueError(
+                    f"Given gate {c_gate} is not a valid Pennylane controlled gate."
+                )
+            return gate_function
+        except AttributeError:
+            raise ValueError(
+                f"Invalid controlled gate type: {c_gate}."
+            )
+
+    def _get_params_num(self) -> int:
+        """
+        Calculates the total number of parameters required for the ansatz.
+        """
+        return qml.StronglyEntanglingLayers.shape(
+            n_layers=self._n_layers, n_wires=self._n_qubits
+        )
+
+    def _variational_func(
+            self,
+            params: jnp.ndarray
+    ) -> None:
+        """
+        Defines and applies the variational form of the quantum circuit.
+
+        Args:
+            params: Array of parameters for the variational function.
+        """
+        qml.StronglyEntanglingLayers(
+            weights=params,
+            wires=range(self._n_qubits),
+            ranges=self._ranges,
+            imprimitive=self._controlled_gate
+        )
+
+    def apply(
+            self,
+            params: jnp.ndarray
+    ) -> None:
+        """
+        Applies the variational ansatz to the quantum circuit.
+
+        Args:
+            params: Array of parameters for the entire variational form.
+        """
+        self._variational_func(params=params)
