@@ -247,7 +247,7 @@ class QNNClassifier(QNN):
             measurements_num = 1
         else:
             measurements_num = classes_num
-        self.num_classes = classes_num
+        self.classes_num = classes_num
 
         super().__init__(
             n_qubits=n_qubits,
@@ -278,7 +278,7 @@ class QNNClassifier(QNN):
             where each row corresponds to a sample and each column corresponds to a class.
         """
         logits = jnp.array(self.q_model(self.weights, x))
-        if self.num_classes == 2:
+        if self.classes_num == 2:
             return logits.ravel()
         else:
             return logits.T
@@ -306,7 +306,7 @@ class QNNClassifier(QNN):
         """
         logits = self.predict_proba(x)
 
-        if self.num_classes == 2:
+        if self.classes_num == 2:
             return jnp.where(logits >= threshold, 1, 0)
         else:
             return jnp.argmax(logits, axis=1)
