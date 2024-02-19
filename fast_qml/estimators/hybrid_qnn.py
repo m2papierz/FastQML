@@ -203,7 +203,7 @@ class HybridClassifier(HybridModel):
             q_model=q_model
         )
 
-        self._num_classes = self._q_model.num_classes
+        self._classes_num = self._q_model.classes_num
 
     def predict_proba(
             self,
@@ -233,7 +233,7 @@ class HybridClassifier(HybridModel):
             x_data=x, batch_stats=batch_stats, training=False
         )
 
-        if self._num_classes == 2:
+        if self._classes_num == 2:
             return jnp.array(logits).ravel()
         else:
             return jnp.array(logits).T
@@ -261,7 +261,7 @@ class HybridClassifier(HybridModel):
         """
         predictions = self.predict_proba(x)
 
-        if self._num_classes == 2:
+        if self._classes_num == 2:
             return jnp.where(predictions >= threshold, 1, 0)
         else:
             return jnp.argmax(predictions, axis=1)
