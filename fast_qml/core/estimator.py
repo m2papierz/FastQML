@@ -8,15 +8,16 @@
 #
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
+import os
 from abc import abstractmethod
+from pathlib import Path
 from typing import (
     Callable, Union, Any, Tuple, Dict, Mapping)
 
 import jax
 import torch
-import orbax.checkpoint
+import pickle
 import flax.linen as nn
-from flax.training import orbax_utils
 import numpy as np
 import pennylane as qml
 from jax import numpy as jnp
@@ -31,30 +32,62 @@ from fast_qml.core.optimizer import (
 
 
 class Estimator:
+    """
+    An abstract base class for creating machine learning estimators.
+
+    This class provides a template for implementing machine learning estimators with basic functionalities
+    for model saving, and loading. It requires subclasses to implement the parameter initialization method.
+    """
     def __init__(self):
         self.params = self._initialize_parameters()
-        self._checkpointer = orbax.checkpoint.PyTreeCheckpointer()
 
     @abstractmethod
     def _initialize_parameters(
-            self,
-            input_shape: Union[int, Tuple[int], None] = None,
-            batch_norm: Union[bool, None] = None
+            self
     ) -> Union[jnp.ndarray, Dict[str, Any]]:
         """
-        Initialize parameters of the estimator model.
+        Abstract method to initialize parameters of the estimator model. This method must be implemented
+        by subclasses to define how the model parameters should be initialized.
         """
         raise NotImplementedError("Subclasses must implement this method.")
 
-    def model_save(self, directory: str) -> None:
-        params_dict = {'params': self.params}
-        save_args = orbax_utils.save_args_from_target(params_dict)
-        self._checkpointer.save(
-            directory, params_dict, save_args)
+    def model_save(
+            self,
+            directory: str,
+            name: str
+    ) -> None:
+        """
+        Saves the model parameters to a pickle file. This method saves the current state of the model
+        parameters to a specified directory with a given name.
 
-    def model_load(self, directory: str):
-        params_dict = self._checkpointer.restore(directory)
-        self.params = params_dict['params']
+        Args:
+            directory: The directory path where the model should be saved.
+            name: The name of the file to save the model parameters.
+
+        The model is saved in a binary file with a `.model` extension.
+        """
+        dir_ = Path(directory)
+        dir_ = Path(directory)
+        if not os.path.exists(dir_):
+            os.mkdir(dir_)
+
+        with open(dir_ / f"{name}.model", 'wb') as f:
+            pickle.dump(self.params, f)
+    def model_load(
+            self,
+            path: str
+    ) -> None:
+        """
+        Loads model parameters from a pickle file. This method loads the model parameters from a specified
+        file path, updating the `params` attribute of the instance.
+
+        Args:
+            path: The file path to load the model parameters from.
+
+        The method expects a binary file with saved model parameters.
+        """
+        with open(Path(path), 'rb') as f:
+            self.params = pickle.load(f)
 
 
 class QuantumEstimator(Estimator):
@@ -85,8 +118,6 @@ class QuantumEstimator(Estimator):
             measurement_op: Callable = qml.PauliZ,
             measurements_num: int = 1
     ):
-        super().__init__()
-
         # Validate measurement operation
         if not self._is_valid_measurement_op(measurement_op):
             raise ValueError("Invalid measurement operation provided.")
@@ -101,7 +132,8 @@ class QuantumEstimator(Estimator):
 
         self._device = qml.device(
             name="default.qubit.jax", wires=self._n_qubits)
-        self.params = self._initialize_parameters()
+
+        super().__init__()
 
     @staticmethod
     def _is_valid_measurement_op(measurement_op):
@@ -199,8 +231,6 @@ class ClassicalEstimator(Estimator):
             optimizer: Callable,
             batch_norm: bool
     ):
-        super().__init__()
-
         self._c_model = c_model
         self._loss_fn = loss_fn
         self._optimizer = optimizer
@@ -210,6 +240,8 @@ class ClassicalEstimator(Estimator):
             jax.random.PRNGKey(seed=42), num=2)
         self.params = self._initialize_parameters(
             input_shape=input_shape, batch_norm=batch_norm)
+
+        super().__init__()
 
     @abstractmethod
     def _model(
@@ -306,8 +338,6 @@ class HybridEstimator(Estimator):
             c_model: nn.Module,
             q_model: QuantumEstimator
     ):
-        super().__init__()
-
         self._c_model = c_model
         self._q_model = q_model
         self._loss_fn = q_model.loss_fn
@@ -318,6 +348,8 @@ class HybridEstimator(Estimator):
             jax.random.PRNGKey(seed=42), num=2)
         self.params = self._initialize_parameters(
             input_shape=input_shape, batch_norm=self._batch_norm)
+
+        super().__init__()
 
     @abstractmethod
     def _model(
