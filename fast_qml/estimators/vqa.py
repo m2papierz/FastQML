@@ -19,7 +19,7 @@ of loss functions suitable for various machine learning tasks.
 """
 
 from typing import (
-    Callable, Union, Tuple, Dict, Any)
+    Callable, Union, Dict, Any)
 
 import jax
 import numpy as np

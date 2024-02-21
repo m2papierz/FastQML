@@ -23,7 +23,7 @@ Classes:
 """
 
 from typing import (
-    Union, Dict, Any, Tuple, Callable)
+    Union, Dict, Any, Callable)
 
 import jax
 import numpy as np
