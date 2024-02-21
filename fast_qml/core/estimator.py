@@ -27,7 +27,24 @@ from fast_qml.core.callbacks import EarlyStopping
 from fast_qml.core.optimizer import (
     QuantumOptimizer, ClassicalOptimizer, HybridOptimizer)
 
-class QuantumEstimator:
+
+class Estimator:
+    def __init__(self):
+        self.params = self._initialize_parameters()
+
+    @abstractmethod
+    def _initialize_parameters(
+            self,
+            input_shape: Union[int, Tuple[int], None] = None,
+            batch_norm: Union[bool, None] = None
+    ) -> Union[jnp.ndarray, Dict[str, Any]]:
+        """
+        Initialize parameters of the estimator model.
+        """
+        raise NotImplementedError("Subclasses must implement this method.")
+
+
+class QuantumEstimator(Estimator):
     """
     Provides a framework for implementing quantum machine learning estimators.
 
@@ -55,6 +72,8 @@ class QuantumEstimator:
             measurement_op: Callable = qml.PauliZ,
             measurements_num: int = 1
     ):
+        super().__init__()
+
         # Validate measurement operation
         if not self._is_valid_measurement_op(measurement_op):
             raise ValueError("Invalid measurement operation provided.")
@@ -77,14 +96,6 @@ class QuantumEstimator:
         Check if the provided measurement operation is valid.
         """
         return isinstance(measurement_op(0), qml.operation.Operation)
-
-    @abstractmethod
-    def _initialize_parameters(self) -> jnp.ndarray:
-        """
-        Initialize weights for the quantum circuit.
-        """
-        raise NotImplementedError("Subclasses must implement this method.")
-
     @abstractmethod
     def q_model(
             self,
@@ -152,7 +163,7 @@ class QuantumEstimator:
         self.params = optimizer.parameters
 
 
-class ClassicalEstimator:
+class ClassicalEstimator(Estimator):
     """
     Base class for creating classical machine learning estimators based on Flax models.
 
@@ -175,6 +186,8 @@ class ClassicalEstimator:
             optimizer: Callable,
             batch_norm: bool
     ):
+        super().__init__()
+
         self._c_model = c_model
         self._loss_fn = loss_fn
         self._optimizer = optimizer
@@ -184,17 +197,6 @@ class ClassicalEstimator:
             jax.random.PRNGKey(seed=42), num=2)
         self.params = self._initialize_parameters(
             input_shape=input_shape, batch_norm=batch_norm)
-
-    @abstractmethod
-    def _initialize_parameters(
-            self,
-            input_shape: Union[int, Tuple[int]],
-            batch_norm: bool
-    ) -> Dict[str, Any]:
-        """
-        Initializes parameters for the classical model.
-        """
-        raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
     def _model(
@@ -272,7 +274,7 @@ class ClassicalEstimator:
         self.params['batch_stats'] = optimizer.batch_stats
 
 
-class HybridEstimator:
+class HybridEstimator(Estimator):
     """
     Provides a framework for creating hybrid quantum-classical machine learning estimators.
 
@@ -291,6 +293,8 @@ class HybridEstimator:
             c_model: nn.Module,
             q_model: QuantumEstimator
     ):
+        super().__init__()
+
         self._c_model = c_model
         self._q_model = q_model
         self._loss_fn = q_model.loss_fn
@@ -301,17 +305,6 @@ class HybridEstimator:
             jax.random.PRNGKey(seed=42), num=2)
         self.params = self._initialize_parameters(
             input_shape=input_shape, batch_norm=self._batch_norm)
-
-    @abstractmethod
-    def _initialize_parameters(
-            self,
-            input_shape: Union[int, Tuple[int]],
-            batch_norm: bool
-    ) -> Dict[str, Any]:
-        """
-        Initializes weights for the classical and quantum models.
-        """
-        raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
     def _model(

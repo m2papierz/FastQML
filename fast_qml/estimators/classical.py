@@ -50,9 +50,9 @@ class ClassicalModel(ClassicalEstimator):
 
     def _initialize_parameters(
             self,
-            input_shape: Union[int, Tuple[int]],
-            batch_norm: bool
-    ) -> Dict[str, Any]:
+            input_shape: Union[int, Tuple[int], None] = None,
+            batch_norm: Union[bool, None] = None
+    ) -> Union[jnp.ndarray, Dict[str, Any]]:
         """
         Initializes parameters for the classical and quantum models.
 

@@ -18,7 +18,8 @@ leveraging quantum feature maps and variational forms. They are capable of handl
 of loss functions suitable for various machine learning tasks.
 """
 
-from typing import Callable
+from typing import (
+    Callable, Union, Tuple, Dict, Any)
 
 import jax
 import numpy as np
@@ -66,7 +67,11 @@ class VariationalQuantumEstimator(QuantumEstimator):
             measurements_num=measurements_num
         )
 
-    def _initialize_parameters(self) -> jnp.ndarray:
+    def _initialize_parameters(
+            self,
+            input_shape: Union[int, Tuple[int], None] = None,
+            batch_norm: Union[bool, None] = None
+    ) -> Union[jnp.ndarray, Dict[str, Any]]:
         """
         Initialize weights for the quantum circuit.
         """
