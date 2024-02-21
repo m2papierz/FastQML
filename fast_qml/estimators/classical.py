@@ -160,9 +160,9 @@ class ClassicalRegressor(ClassicalModel):
         """
         if self.batch_norm:
             weights, batch_stats = (
-                self._params['weights'], self._params['batch_stats'])
+                self.params['weights'], self.params['batch_stats'])
         else:
-            weights, batch_stats = self._params['weights'], None
+            weights, batch_stats = self.params['weights'], None
 
         return jnp.array(
             self._model(
@@ -221,9 +221,9 @@ class ClassicalClassifier(ClassicalModel):
         """
         if self.batch_norm:
             weights, batch_stats = (
-                self._params['weights'], self._params['batch_stats'])
+                self.params['weights'], self.params['batch_stats'])
         else:
-            weights, batch_stats = self._params['weights'], None
+            weights, batch_stats = self.params['weights'], None
 
         logits = self._model(
             weights=weights, x_data=x,

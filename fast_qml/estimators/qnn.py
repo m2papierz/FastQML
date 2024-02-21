@@ -172,7 +172,7 @@ class QNN(QuantumEstimator):
                     weights=params[i], x_data=inputs)
 
         aux_input = np.array([aux_input])
-        print(qml.draw(draw_circuit)(self.weights, aux_input))
+        print(qml.draw(draw_circuit)(self.params, aux_input))
 
 
 class QNNRegressor(QNN):
@@ -215,7 +215,7 @@ class QNNRegressor(QNN):
             x: An array of input data.
         """
         return jnp.array(
-            self.q_model(weights=self.weights, x_data=x)
+            self.q_model(weights=self.params, x_data=x)
         ).ravel()
 
 
@@ -277,7 +277,7 @@ class QNNClassifier(QNN):
             a single probability for each sample. For multi-class classification, this will be a 2D array
             where each row corresponds to a sample and each column corresponds to a class.
         """
-        logits = jnp.array(self.q_model(self.weights, x))
+        logits = jnp.array(self.q_model(self.params, x))
         if self.num_classes == 2:
             return logits.ravel()
         else:

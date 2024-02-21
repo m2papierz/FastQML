@@ -69,7 +69,7 @@ class QuantumEstimator:
 
         self._device = qml.device(
             name="default.qubit.jax", wires=self._n_qubits)
-        self.weights = self._initialize_weights()
+        self.params = self._initialize_parameters()
 
     @staticmethod
     def _is_valid_measurement_op(measurement_op):
@@ -79,7 +79,7 @@ class QuantumEstimator:
         return isinstance(measurement_op(0), qml.operation.Operation)
 
     @abstractmethod
-    def _initialize_weights(self) -> jnp.ndarray:
+    def _initialize_parameters(self) -> jnp.ndarray:
         """
         Initialize weights for the quantum circuit.
         """
@@ -130,7 +130,7 @@ class QuantumEstimator:
         """
         optimizer = QuantumOptimizer(
             c_params=None,
-            q_params=self.weights,
+            q_params=self.params,
             batch_stats=None,
             model=self.q_model,
             loss_fn=self.loss_fn,
@@ -149,7 +149,7 @@ class QuantumEstimator:
             verbose=verbose
         )
 
-        self.weights = optimizer.weights
+        self.params = optimizer.weights
 
 
 class ClassicalEstimator:
@@ -182,7 +182,7 @@ class ClassicalEstimator:
 
         self._inp_rng, self._init_rng = jax.random.split(
             jax.random.PRNGKey(seed=42), num=2)
-        self._params = self._initialize_parameters(
+        self.params = self._initialize_parameters(
             input_shape=input_shape, batch_norm=batch_norm)
 
     @abstractmethod
@@ -243,9 +243,9 @@ class ClassicalEstimator:
         """
         if self.batch_norm:
             weights, batch_stats = (
-                self._params['weights'], self._params['batch_stats'])
+                self.params['weights'], self.params['batch_stats'])
         else:
-            weights, batch_stats = self._params['weights'], None
+            weights, batch_stats = self.params['weights'], None
 
         optimizer = ClassicalOptimizer(
             c_params=weights,
@@ -268,8 +268,8 @@ class ClassicalEstimator:
             verbose=verbose
         )
 
-        self._params['weights'] = optimizer.weights
-        self._params['batch_stats'] = optimizer.batch_stats
+        self.params['weights'] = optimizer.weights
+        self.params['batch_stats'] = optimizer.batch_stats
 
 
 class HybridEstimator:
@@ -299,7 +299,7 @@ class HybridEstimator:
 
         self._inp_rng, self._init_rng = jax.random.split(
             jax.random.PRNGKey(seed=42), num=2)
-        self._params = self._initialize_parameters(
+        self.params = self._initialize_parameters(
             input_shape=input_shape, batch_norm=self._batch_norm)
 
     @abstractmethod
@@ -361,10 +361,10 @@ class HybridEstimator:
         """
         if self._batch_norm:
             c_weights, batch_stats = (
-                self._params['c_weights'], self._params['batch_stats'])
+                self.params['c_weights'], self.params['batch_stats'])
         else:
-            c_weights, batch_stats = self._params['c_weights'], None
-        q_weights = self._params['q_weights']
+            c_weights, batch_stats = self.params['c_weights'], None
+        q_weights = self.params['q_weights']
 
         optimizer = HybridOptimizer(
             c_params=c_weights,
@@ -387,5 +387,5 @@ class HybridEstimator:
             verbose=verbose
         )
 
-        self._params['c_weights'], self._params['q_weights'] = optimizer.weights
-        self._params['batch_stats'] = optimizer.batch_stats
+        self.params['c_weights'], self.params['q_weights'] = optimizer.weights
+        self.params['batch_stats'] = optimizer.batch_stats

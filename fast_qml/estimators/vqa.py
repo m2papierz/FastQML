@@ -66,7 +66,7 @@ class VariationalQuantumEstimator(QuantumEstimator):
             measurements_num=measurements_num
         )
 
-    def _initialize_weights(self) -> jnp.ndarray:
+    def _initialize_parameters(self) -> jnp.ndarray:
         """
         Initialize weights for the quantum circuit.
         """
@@ -140,7 +140,7 @@ class VariationalQuantumEstimator(QuantumEstimator):
             self._quantum_layer(params, inputs)
 
         aux_input = np.array([aux_input])
-        print(qml.draw(draw_circuit)(self.weights, aux_input))
+        print(qml.draw(draw_circuit)(self.params, aux_input))
 
 
 class VQRegressor(VariationalQuantumEstimator):
@@ -181,7 +181,7 @@ class VQRegressor(VariationalQuantumEstimator):
             x: An array of input data.
         """
         return jnp.array(
-            self.q_model(weights=self.weights, x_data=x)
+            self.q_model(weights=self.params, x_data=x)
         ).ravel()
 
 
@@ -239,7 +239,7 @@ class VQClassifier(VariationalQuantumEstimator):
             where each row corresponds to a sample and each column corresponds to a class.
         """
         logits = jnp.array(
-            self.q_model( weights=self.weights, x_data=x))
+            self.q_model( weights=self.params, x_data=x))
 
         if self.num_classes == 2:
             return logits.ravel()

@@ -74,7 +74,7 @@ class HybridModel(HybridEstimator):
             c_weights, batch_stats = variables['params'], variables['batch_stats']
             return {
                 'c_weights': c_weights,
-                'q_weights': self._q_model.weights,
+                'q_weights': self._q_model.params,
                 'batch_stats': batch_stats
             }
         else:
@@ -82,7 +82,7 @@ class HybridModel(HybridEstimator):
             c_weights = variables['params']
             return {
                 'c_weights': c_weights,
-                'q_weights': self._q_model.weights
+                'q_weights': self._q_model.params
             }
 
     def _model(
@@ -167,10 +167,10 @@ class HybridRegressor(HybridModel):
         """
         if self._batch_norm:
             c_weights, batch_stats = (
-                self._params['c_weights'], self._params['batch_stats'])
+                self.params['c_weights'], self.params['batch_stats'])
         else:
-            c_weights, batch_stats = self._params['c_weights'], None
-        q_weights = self._params['q_weights']
+            c_weights, batch_stats = self.params['c_weights'], None
+        q_weights = self.params['q_weights']
 
         return jnp.array(
             self._model(
@@ -223,10 +223,10 @@ class HybridClassifier(HybridModel):
         """
         if self._batch_norm:
             c_weights, batch_stats = (
-                self._params['c_weights'], self._params['batch_stats'])
+                self.params['c_weights'], self.params['batch_stats'])
         else:
-            c_weights, batch_stats = self._params['c_weights'], None
-        q_weights = self._params['q_weights']
+            c_weights, batch_stats = self.params['c_weights'], None
+        q_weights = self.params['q_weights']
 
         logits = self._model(
             c_weights=c_weights, q_weights=q_weights,
