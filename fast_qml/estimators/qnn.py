@@ -85,9 +85,8 @@ class QNN(QuantumEstimator):
             measurements_num=measurements_num
         )
 
-    def _initialize_parameters(  self,
-            input_shape: Union[int, Tuple[int], None] = None,
-            batch_norm: Union[bool, None] = None
+    def _initialize_parameters(
+            self
     ) -> Union[jnp.ndarray, Dict[str, Any]]:
         """
         Initialize weights for the quantum circuit.
