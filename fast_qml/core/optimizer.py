@@ -120,7 +120,7 @@ class Optimizer:
         return self._batch_stats
 
     @property
-    def weights(
+    def parameters(
             self
     ) -> Union[jnp.ndarray, Dict[str, Mapping[str, jnp.ndarray]], Tuple]:
         """

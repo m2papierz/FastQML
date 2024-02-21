@@ -149,7 +149,7 @@ class QuantumEstimator:
             verbose=verbose
         )
 
-        self.params = optimizer.weights
+        self.params = optimizer.parameters
 
 
 class ClassicalEstimator:
@@ -268,7 +268,7 @@ class ClassicalEstimator:
             verbose=verbose
         )
 
-        self.params['weights'] = optimizer.weights
+        self.params['weights'] = optimizer.parameters
         self.params['batch_stats'] = optimizer.batch_stats
 
 
@@ -387,5 +387,5 @@ class HybridEstimator:
             verbose=verbose
         )
 
-        self.params['c_weights'], self.params['q_weights'] = optimizer.weights
+        self.params['c_weights'], self.params['q_weights'] = optimizer.parameters
         self.params['batch_stats'] = optimizer.batch_stats
