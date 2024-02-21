@@ -14,7 +14,9 @@ from typing import (
 
 import jax
 import torch
+import orbax.checkpoint
 import flax.linen as nn
+from flax.training import orbax_utils
 import numpy as np
 import pennylane as qml
 from jax import numpy as jnp
@@ -31,6 +33,7 @@ from fast_qml.core.optimizer import (
 class Estimator:
     def __init__(self):
         self.params = self._initialize_parameters()
+        self._checkpointer = orbax.checkpoint.PyTreeCheckpointer()
 
     @abstractmethod
     def _initialize_parameters(
@@ -42,6 +45,16 @@ class Estimator:
         Initialize parameters of the estimator model.
         """
         raise NotImplementedError("Subclasses must implement this method.")
+
+    def model_save(self, directory: str) -> None:
+        params_dict = {'params': self.params}
+        save_args = orbax_utils.save_args_from_target(params_dict)
+        self._checkpointer.save(
+            directory, params_dict, save_args)
+
+    def model_load(self, directory: str):
+        params_dict = self._checkpointer.restore(directory)
+        self.params = params_dict['params']
 
 
 class QuantumEstimator(Estimator):
