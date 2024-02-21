@@ -182,7 +182,7 @@ class ClassicalClassifier(ClassicalModel):
         loss_fn: The loss function used to evaluate the model.
         optimizer: The optimization algorithm.
         batch_norm: Indicates whether batch normalization is used within the model.
-        num_classes: Number of classes in the classification problem.
+        classes_num: Number of classes in the classification problem.
     """
     def __init__(
             self,
@@ -191,7 +191,7 @@ class ClassicalClassifier(ClassicalModel):
             loss_fn: Callable,
             optimizer: Callable,
             batch_norm: bool,
-            num_classes: int
+            classes_num: int
     ):
         super().__init__(
             input_shape=input_shape,
@@ -201,7 +201,7 @@ class ClassicalClassifier(ClassicalModel):
             batch_norm=batch_norm
         )
 
-        self.num_classes = num_classes
+        self.classes_num = classes_num
 
     def predict_proba(
             self,
@@ -230,7 +230,7 @@ class ClassicalClassifier(ClassicalModel):
             batch_stats=batch_stats, training=False
         )
 
-        if self.num_classes == 2:
+        if self.classes_num == 2:
             return jnp.array(logits).ravel()
         else:
             return jnp.array(logits)
@@ -258,7 +258,7 @@ class ClassicalClassifier(ClassicalModel):
         """
         logits = self.predict_proba(x)
 
-        if self.num_classes == 2:
+        if self.classes_num == 2:
             return jnp.where(logits >= threshold, 1, 0)
         else:
             return jnp.argmax(logits, axis=1)

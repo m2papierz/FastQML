@@ -336,7 +336,7 @@ class HybridEstimator(Estimator):
             self,
             input_shape,
             c_model: nn.Module,
-            q_model: QuantumEstimator
+            q_model: Any
     ):
         self._c_model = c_model
         self._q_model = q_model
