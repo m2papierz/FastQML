@@ -91,14 +91,17 @@ class QNN(QuantumEstimator):
         """
         Initialize weights for the quantum circuit.
         """
-        key = jax.random.PRNGKey(42)
-        params_shape = self._ansatz.params_num
-        if isinstance(params_shape, int):
+        rand_key = jax.random.PRNGKey(42)
+
+        if isinstance(self._ansatz.params_num, int):
             weights = 0.1 * jax.random.normal(
-                key, shape=(self._layers_num, self._ansatz.params_num))
+                rand_key, shape=(self._layers_num, self._ansatz.params_num))
         else:
+            if not all(isinstance(dim, int) for dim in self._ansatz.params_num):
+                raise ValueError("input_shape must be a tuple or list of integers.")
+
             weights = 0.1 * jax.random.normal(
-                key, shape=(self._layers_num, *self._ansatz.params_num))
+                rand_key, shape=(self._layers_num, *self._ansatz.params_num))
         return weights
 
     def _quantum_layer(
@@ -250,7 +253,7 @@ class QNNClassifier(QNN):
             measurements_num = 1
         else:
             measurements_num = classes_num
-        self.num_classes = classes_num
+        self.classes_num = classes_num
 
         super().__init__(
             n_qubits=n_qubits,
@@ -281,7 +284,7 @@ class QNNClassifier(QNN):
             where each row corresponds to a sample and each column corresponds to a class.
         """
         logits = jnp.array(self.q_model(self.params, x))
-        if self.num_classes == 2:
+        if self.classes_num == 2:
             return logits.ravel()
         else:
             return logits.T
@@ -309,7 +312,7 @@ class QNNClassifier(QNN):
         """
         logits = self.predict_proba(x)
 
-        if self.num_classes == 2:
+        if self.classes_num == 2:
             return jnp.where(logits >= threshold, 1, 0)
         else:
             return jnp.argmax(logits, axis=1)

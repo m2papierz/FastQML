@@ -64,10 +64,13 @@ class HybridModel(HybridEstimator):
         Returns:
             A dictionary containing initialized weights for both classical and quantum models.
         """
-        if not all(isinstance(dim, int) for dim in input_shape):
-            raise ValueError("input_shape must be a tuple or list of integers.")
+        if isinstance(input_shape, int):
+            c_inp = jax.random.normal(self._inp_rng, shape=(1, input_shape))
+        else:
+            if not all(isinstance(dim, int) for dim in input_shape):
+                raise ValueError("input_shape must be a tuple or list of integers.")
 
-        c_inp = jax.random.normal(self._inp_rng, shape=(1, *input_shape))
+            c_inp = jax.random.normal(self._inp_rng, shape=(1, *input_shape))
 
         if batch_norm:
             variables = self._c_model.init(self._init_rng, c_inp, train=False)

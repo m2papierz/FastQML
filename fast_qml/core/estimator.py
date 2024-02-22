@@ -39,17 +39,7 @@ class Estimator:
     for model saving, and loading. It requires subclasses to implement the parameter initialization method.
     """
     def __init__(self):
-        self.params = self._initialize_parameters()
-
-    @abstractmethod
-    def _initialize_parameters(
-            self
-    ) -> Union[jnp.ndarray, Dict[str, Any]]:
-        """
-        Abstract method to initialize parameters of the estimator model. This method must be implemented
-        by subclasses to define how the model parameters should be initialized.
-        """
-        raise NotImplementedError("Subclasses must implement this method.")
+        self.params = None
 
     def model_save(
             self,
@@ -67,12 +57,12 @@ class Estimator:
         The model is saved in a binary file with a `.model` extension.
         """
         dir_ = Path(directory)
-        dir_ = Path(directory)
         if not os.path.exists(dir_):
             os.mkdir(dir_)
 
         with open(dir_ / f"{name}.model", 'wb') as f:
             pickle.dump(self.params, f)
+
     def model_load(
             self,
             path: str
@@ -118,6 +108,8 @@ class QuantumEstimator(Estimator):
             measurement_op: Callable = qml.PauliZ,
             measurements_num: int = 1
     ):
+        super().__init__()
+
         # Validate measurement operation
         if not self._is_valid_measurement_op(measurement_op):
             raise ValueError("Invalid measurement operation provided.")
@@ -132,8 +124,17 @@ class QuantumEstimator(Estimator):
 
         self._device = qml.device(
             name="default.qubit.jax", wires=self._n_qubits)
+        self.params = self._initialize_parameters()
 
-        super().__init__()
+    @abstractmethod
+    def _initialize_parameters(
+            self
+    ) -> Union[jnp.ndarray, Dict[str, Any]]:
+        """
+        Abstract method to initialize parameters of the estimator model. This method must be implemented
+        by subclasses to define how the model parameters should be initialized.
+        """
+        raise NotImplementedError("Subclasses must implement this method.")
 
     @staticmethod
     def _is_valid_measurement_op(measurement_op):
@@ -141,6 +142,7 @@ class QuantumEstimator(Estimator):
         Check if the provided measurement operation is valid.
         """
         return isinstance(measurement_op(0), qml.operation.Operation)
+
     @abstractmethod
     def q_model(
             self,
@@ -231,6 +233,8 @@ class ClassicalEstimator(Estimator):
             optimizer: Callable,
             batch_norm: bool
     ):
+        super().__init__()
+
         self._c_model = c_model
         self._loss_fn = loss_fn
         self._optimizer = optimizer
@@ -241,7 +245,17 @@ class ClassicalEstimator(Estimator):
         self.params = self._initialize_parameters(
             input_shape=input_shape, batch_norm=batch_norm)
 
-        super().__init__()
+    @abstractmethod
+    def _initialize_parameters(
+            self,
+            input_shape: Union[int, Tuple[int], None] = None,
+            batch_norm: Union[bool, None] = None
+    ) -> Union[jnp.ndarray, Dict[str, Any]]:
+        """
+        Abstract method to initialize parameters of the estimator model. This method must be implemented
+        by subclasses to define how the model parameters should be initialized.
+        """
+        raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
     def _model(
@@ -338,6 +352,8 @@ class HybridEstimator(Estimator):
             c_model: nn.Module,
             q_model: Any
     ):
+        super().__init__()
+
         self._c_model = c_model
         self._q_model = q_model
         self._loss_fn = q_model.loss_fn
@@ -349,7 +365,17 @@ class HybridEstimator(Estimator):
         self.params = self._initialize_parameters(
             input_shape=input_shape, batch_norm=self._batch_norm)
 
-        super().__init__()
+    @abstractmethod
+    def _initialize_parameters(
+            self,
+            input_shape: Union[int, Tuple[int], None] = None,
+            batch_norm: Union[bool, None] = None
+    ) -> Union[jnp.ndarray, Dict[str, Any]]:
+        """
+        Abstract method to initialize parameters of the estimator model. This method must be implemented
+        by subclasses to define how the model parameters should be initialized.
+        """
+        raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
     def _model(

@@ -73,11 +73,13 @@ class VariationalQuantumEstimator(QuantumEstimator):
         """
         Initialize weights for the quantum circuit.
         """
-        params_shape = self._ansatz.params_num
-        if isinstance(params_shape, int):
+        if isinstance(self._ansatz.params_num, int):
             weights = 0.1 * jax.random.normal(
                 jax.random.PRNGKey(42), shape=[self._ansatz.params_num])
         else:
+            if not all(isinstance(dim, int) for dim in self._ansatz.params_num):
+                raise ValueError("input_shape must be a tuple or list of integers.")
+
             weights = 0.1 * jax.random.normal(
                 jax.random.PRNGKey(42), shape=[*self._ansatz.params_num])
         return weights
