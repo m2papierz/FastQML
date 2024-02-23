@@ -11,8 +11,7 @@
 import os
 from abc import abstractmethod
 from pathlib import Path
-from typing import (
-    Callable, Union, Any, Tuple, Dict, Mapping)
+from typing import Callable, Union, List, Any, Tuple, Dict, Mapping
 
 import jax
 import torch
@@ -31,6 +30,114 @@ from fast_qml.core.optimizer import (
     QuantumOptimizer, ClassicalOptimizer, HybridOptimizer)
 
 
+class ParametersInitializer:
+    def __init__(self, seed: int = 42):
+        self._parameters: Dict[str, Union[jnp.ndarray, Any]] = {}
+        self._inp_rng, self._init_rng = jax.random.split(
+            jax.random.PRNGKey(seed=seed), num=2)
+
+    def add_parameter(
+            self,
+            name: str,
+            array: Union[jnp.ndarray, Any]
+    ) -> None:
+        self._parameters[name] = array
+
+    def _init_vqa_params(
+            self,
+            n_ansatz_params: Union[int, List[int]]
+    ):
+        if isinstance(n_ansatz_params, int):
+            shape = [n_ansatz_params]
+        else:
+            shape = n_ansatz_params
+        weights = jax.random.normal(self._init_rng, shape=shape)
+        self.add_parameter(name="q_weights", array=weights)
+
+    def _init_qnn_params(
+            self,
+            n_ansatz_params: Union[int, List[int]],
+            layers_n: int
+    ):
+        if isinstance(n_ansatz_params, int):
+            shape = (layers_n, n_ansatz_params)
+        else:
+            shape = (layers_n, *n_ansatz_params)
+
+        weights = jax.random.normal(self._init_rng, shape=shape)
+        self.add_parameter(name="q_weights", array=weights)
+
+    def _init_classical_params(
+            self,
+            c_model: nn.Module,
+            input_shape: Union[int, Tuple[int], None] = None,
+            batch_norm: Union[bool, None] = None
+    ):
+        if isinstance(input_shape, int):
+            shape = (1, input_shape)
+        else:
+            shape = (1, *input_shape)
+
+        c_inp = jax.random.normal(self._inp_rng, shape=shape)
+
+        if batch_norm:
+            variables = c_model.init(self._init_rng, c_inp, train=False)
+            weights, batch_stats = variables['params'], variables['batch_stats']
+
+            self.add_parameter(name="c_weights", array=weights)
+            self.add_parameter(name="batch_stats", array=batch_stats)
+        else:
+            variables = c_model.init(self._init_rng, c_inp)
+            weights = variables['params']
+
+            self.add_parameter(name="c_weights", array=weights)
+
+    def _init_hybrid_params(
+            self,
+            c_model: nn.Module,
+            q_model_params: Union[int, Tuple[int]],
+            input_shape: Union[int, Tuple[int], None] = None,
+            batch_norm: Union[bool, None] = None
+    ):
+        self._init_classical_params(
+            c_model=c_model,
+            input_shape=input_shape,
+            batch_norm=batch_norm
+        )
+        self.add_parameter(name="q_weights", array=q_model_params)
+
+    def init(
+            self,
+            estimator_type: str,
+            n_ansatz_params: Union[int, List[int], None] = None,
+            layers_n: Union[int, None] = None,
+            c_model: Union[nn.Module, None] = None,
+            q_model_params: Union[int, Tuple[int], None] = None,
+            input_shape: Union[int, Tuple[int], None] = None,
+            batch_norm: Union[bool, None] = None
+    ):
+        if estimator_type == 'vqa':
+            self._init_vqa_params(
+                n_ansatz_params=n_ansatz_params)
+        elif estimator_type == 'qnn':
+            self._init_qnn_params(
+                n_ansatz_params=n_ansatz_params, layers_n=layers_n)
+        elif estimator_type == 'classical':
+            self._init_classical_params(
+                c_model=c_model, input_shape=input_shape, batch_norm=batch_norm)
+        elif estimator_type == 'hybrid':
+            self._init_hybrid_params(
+                c_model=c_model, q_model_params=q_model_params,
+                input_shape=input_shape, batch_norm=batch_norm)
+        else:
+            raise ValueError(
+                f"Unknown estimator type: {estimator_type}. "
+                f"Available types are {['vqa', 'qnn', 'classical', 'hybrid']}"
+            )
+
+        return self._parameters
+
+
 class Estimator:
     """
     An abstract base class for creating machine learning estimators.
@@ -40,6 +147,7 @@ class Estimator:
     """
     def __init__(self):
         self.params = None
+        self._params_initializer = ParametersInitializer()
 
     def model_save(
             self,
