@@ -8,18 +8,18 @@
 #
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
-from typing import Union, Dict, Mapping
+from typing import Union, Dict, Mapping, Tuple
 
 import jax
 import flax.linen as nn
 from jax import numpy as jnp
 
-from fast_qml.core.estimator import HybridEstimator
+from fast_qml.core.estimator import EstimatorParameters, Estimator
 from fast_qml.estimators.qnn import QNNRegressor, QNNClassifier
 from fast_qml.estimators.vqa import VQRegressor, VQClassifier
 
 
-class HybridModel(HybridEstimator):
+class HybridEstimator(Estimator):
     """
     Base class for hybrid quantum-classical machine learning models.
 
@@ -45,38 +45,74 @@ class HybridModel(HybridEstimator):
             batch_norm: bool = False
     ):
         super().__init__(
-            c_model=c_model,
-            q_model=q_model
+            loss_fn=q_model.loss_fn,
+            optimizer_fn=q_model.optimizer_fn,
+            estimator_type='hybrid'
         )
 
-        self.params = self._params_initializer(
-            estimator_type='hybrid',
-            c_model=c_model,
-            q_model_params=q_model.params,
-            input_shape=input_shape,
-            batch_norm=batch_norm
+        self._c_model = c_model
+        self._q_model = q_model
+        self._batch_norm = c_model.batch_norm
+
+        q_weights = q_model.params.q_weights
+        self.params = EstimatorParameters(
+            **self._init_parameters(
+                c_model=c_model,
+                q_weights=q_weights,
+                input_shape=input_shape,
+                batch_norm=batch_norm
+            )
         )
 
-    def _model(
+    def _init_parameters(
             self,
-            c_weights: Dict[str, Mapping[str, jnp.ndarray]],
-            q_weights: jnp.ndarray,
-            batch_stats: Union[Dict[str, Mapping[str, jnp.ndarray]], None],
+            c_model: nn.Module,
+            q_weights: Union[int, Tuple[int]],
+            input_shape: Union[int, Tuple[int], None] = None,
+            batch_norm: Union[bool, None] = None
+    ):
+        if isinstance(input_shape, int):
+            shape = (1, input_shape)
+        else:
+            shape = (1, *input_shape)
+
+        c_inp = jax.random.normal(self._inp_rng, shape=shape)
+
+        if batch_norm:
+            variables = c_model.init(self._init_rng, c_inp, train=False)
+            weights, batch_stats = variables['params'], variables['batch_stats']
+            return {
+                'c_weights': weights,
+                'q_weights': q_weights,
+                'batch_stats': batch_stats}
+        else:
+            variables = c_model.init(self._init_rng, c_inp)
+            weights = variables['params']
+            return {
+                'c_weights': weights,
+                'q_weights': q_weights
+            }
+
+    def model(
+            self,
             x_data: jnp.ndarray,
-            training: bool
+            q_weights: Union[jnp.ndarray, None] = None,
+            c_weights: Union[Dict[str, Mapping[str, jnp.ndarray]], None] = None,
+            batch_stats: Union[Dict[str, Mapping[str, jnp.ndarray]], None] = None,
+            training: Union[bool, None] = None
     ):
         """
-        Defines the hybrid model by combining classical and quantum models.
+        Defines estimator model.
 
         Args:
-            c_weights: Weights of the classical model.
+            x_data: Input data.
             q_weights: Weights of the quantum model.
-            batch_stats: Batch statistics for batch normalization.
-            x_data: Input data for the model.
-            training: Boolean flag indicating if training model inference.
+            c_weights: Weights of the classical model.
+            batch_stats: Batch normalization statistics for the classical model.
+            training: Specifies whether the model is being used for training or inference.
 
         Returns:
-            The output of the hybrid model.
+            Outputs of the estimator model.
         """
         def _hybrid_model():
             if self._batch_norm:
@@ -84,26 +120,26 @@ class HybridModel(HybridEstimator):
                     c_out, updates = self._c_model.apply(
                         {'params': c_weights, 'batch_stats': batch_stats},
                         x_data, train=training, mutable=['batch_stats'])
-                    q_out = self._q_model.q_model(
-                        weights=q_weights, x_data=jax.numpy.array(c_out))
+                    q_out = self._q_model.model(
+                        q_weights=q_weights, x_data=jax.numpy.array(c_out))
                     return jax.numpy.array(q_out), updates['batch_stats']
                 else:
                     c_out = self._c_model.apply(
                         {'params': c_weights, 'batch_stats': batch_stats},
                         x_data, train=training, mutable=False)
-                    q_out = self._q_model.q_model(
-                        weights=q_weights, x_data=jax.numpy.array(c_out))
+                    q_out = self._q_model.model(
+                        q_weights=q_weights, x_data=jax.numpy.array(c_out))
                     return jax.numpy.array(q_out)
             else:
                 c_out = self._c_model.apply({'params': c_weights}, x_data)
-                q_out = self._q_model.q_model(
-                    weights=q_weights, x_data=jax.numpy.array(c_out))
+                q_out = self._q_model.model(
+                    q_weights=q_weights, x_data=jax.numpy.array(c_out))
                 return jax.numpy.array(q_out)
 
         return _hybrid_model()
 
 
-class HybridRegressor(HybridModel):
+class HybridRegressor(HybridEstimator):
     """
     A hybrid quantum-classical regressor for regression tasks.
 
@@ -140,21 +176,16 @@ class HybridRegressor(HybridModel):
         Args:
             x: An array of input data.
         """
-        if self._batch_norm:
-            c_weights, batch_stats = (
-                self.params['c_weights'], self.params['batch_stats'])
-        else:
-            c_weights, batch_stats = self.params['c_weights'], None
-        q_weights = self.params['q_weights']
-
         return jnp.array(
-            self._model(
-                c_weights=c_weights, q_weights=q_weights,
-                x_data=x, batch_stats=batch_stats, training=False)
+            self.model(
+                c_weights=self.params.c_weights,
+                q_weights=self.params.q_weights,
+                batch_stats=self.params.batch_stats,
+                x_data=x, training=False)
         ).ravel()
 
 
-class HybridClassifier(HybridModel):
+class HybridClassifier(HybridEstimator):
     """
     A hybrid quantum-classical classifier for classification tasks.
 
@@ -199,16 +230,11 @@ class HybridClassifier(HybridModel):
             a single probability for each sample. For multi-class classification, this will be a 2D array
             where each row corresponds to a sample and each column corresponds to a class.
         """
-        if self._batch_norm:
-            c_weights, batch_stats = (
-                self.params['c_weights'], self.params['batch_stats'])
-        else:
-            c_weights, batch_stats = self.params['c_weights'], None
-        q_weights = self.params['q_weights']
-
-        logits = self._model(
-            c_weights=c_weights, q_weights=q_weights,
-            x_data=x, batch_stats=batch_stats, training=False
+        logits = self.model(
+                c_weights=self.params.c_weights,
+                q_weights=self.params.q_weights,
+                batch_stats=self.params.batch_stats,
+                x_data=x, training=False
         )
 
         if self._classes_num == 2:
