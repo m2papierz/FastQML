@@ -30,49 +30,91 @@ from fast_qml.core.optimizer import (
     QuantumOptimizer, ClassicalOptimizer, HybridOptimizer)
 
 
-class ParametersInitializer:
+class EstimatorParameters:
+    """
+    Initializes parameters for various types of models, including classical, quantum, and hybrid models.
+
+    This class provides a flexible way to initialize parameters for different types of models
+    by specifying the model type and related configuration. It supports vectorized quantum ansatz (VQA),
+    quantum neural networks (QNN), classical neural networks, and hybrid models combining classical
+    and quantum components.
+
+    Attributes:
+        _parameters: A dictionary to store the initialized parameters.
+        _inp_rng: A JAX PRNG key for input-related randomness.
+        _init_rng: A JAX PRNG key for initialization-related randomness.
+    """
     def __init__(self, seed: int = 42):
         self._parameters: Dict[str, Union[jnp.ndarray, Any]] = {}
         self._inp_rng, self._init_rng = jax.random.split(
             jax.random.PRNGKey(seed=seed), num=2)
 
-    def add_parameter(
+    def add_parameters(
             self,
             name: str,
             array: Union[jnp.ndarray, Any]
     ) -> None:
+        """
+        Adds a parameter to the internal dictionary of parameters.
+
+        Args:
+            name: The name of the parameters.
+            array: The parameters array.
+        """
         self._parameters[name] = array
 
     def _init_vqa_params(
             self,
             n_ansatz_params: Union[int, List[int]]
-    ):
+    ) -> None:
+        """
+        Initializes parameters for a variational quantum model.
+
+        Args:
+            n_ansatz_params: The number of parameters in the ansatz.
+        """
         if isinstance(n_ansatz_params, int):
             shape = [n_ansatz_params]
         else:
             shape = [*n_ansatz_params]
+
         weights = 0.1 * jax.random.normal(self._init_rng, shape=shape)
-        self.add_parameter(name="q_weights", array=weights)
+        self.add_parameters(name="q_weights", array=weights)
 
     def _init_qnn_params(
             self,
             n_ansatz_params: Union[int, List[int]],
             layers_n: int
-    ):
+    ) -> None:
+        """
+         Initializes parameters for a quantum neural network model.
+
+         Args:
+             n_ansatz_params: The number of parameters in the ansatz.
+             layers_n: The number of layers in the model.
+        """
         if isinstance(n_ansatz_params, int):
             shape = (layers_n, n_ansatz_params)
         else:
             shape = (layers_n, *n_ansatz_params)
 
         weights = 0.1 * jax.random.normal(self._init_rng, shape=shape)
-        self.add_parameter(name="q_weights", array=weights)
+        self.add_parameters(name="q_weights", array=weights)
 
     def _init_classical_params(
             self,
             c_model: nn.Module,
             input_shape: Union[int, Tuple[int], None] = None,
             batch_norm: Union[bool, None] = None
-    ):
+    ) -> None:
+        """
+        Initializes parameters for a classical neural network model.
+
+        Args:
+            c_model: The classical neural network model for which parameters are initialized.
+            input_shape: The shape of the input to the model.
+            batch_norm: Indicates whether batch normalization is used.
+        """
         if isinstance(input_shape, int):
             shape = (1, input_shape)
         else:
@@ -84,13 +126,13 @@ class ParametersInitializer:
             variables = c_model.init(self._init_rng, c_inp, train=False)
             weights, batch_stats = variables['params'], variables['batch_stats']
 
-            self.add_parameter(name="c_weights", array=weights)
-            self.add_parameter(name="batch_stats", array=batch_stats)
+            self.add_parameters(name="c_weights", array=weights)
+            self.add_parameters(name="batch_stats", array=batch_stats)
         else:
             variables = c_model.init(self._init_rng, c_inp)
             weights = variables['params']
 
-            self.add_parameter(name="c_weights", array=weights)
+            self.add_parameters(name="c_weights", array=weights)
 
     def _init_hybrid_params(
             self,
@@ -98,13 +140,22 @@ class ParametersInitializer:
             q_model_params: Union[int, Tuple[int]],
             input_shape: Union[int, Tuple[int], None] = None,
             batch_norm: Union[bool, None] = None
-    ):
+    ) -> None:
+        """
+        Initializes parameters for a hybrid quantum-classical model.
+
+        Args:
+            c_model: The classical neural network model for which parameters are initialized.
+            q_model_params: The parameters for the quantum component of the hybrid model.
+            input_shape: The shape of the input to the model.
+            batch_norm: Indicates whether batch normalization is used in classical model.
+        """
         self._init_classical_params(
             c_model=c_model,
             input_shape=input_shape,
             batch_norm=batch_norm
         )
-        self.add_parameter(name="q_weights", array=q_model_params)
+        self.add_parameters(name="q_weights", array=q_model_params)
 
     def __call__(
             self,
@@ -116,6 +167,25 @@ class ParametersInitializer:
             input_shape: Union[int, Tuple[int], None] = None,
             batch_norm: Union[bool, None] = None
     ):
+        """
+        Initializes parameters based on the specified estimator type and configuration.
+
+        Args:
+            estimator_type: The type of estimator/model for which parameters are being initialized.
+                Can be 'vqa', 'qnn', 'classical', or 'hybrid'.
+            n_ansatz_params: The number or shape of parameters in quantum ansatz.
+            layers_n: The number of layers for quantum neural networks.
+            c_model: The classical model component of the hybrid model.
+            q_model_params: The parameters for the quantum component of the hybrid model.
+            input_shape: The input shape for the classical model.
+            batch_norm: Indicates whether batch normalization is used in the classical model.
+
+        Returns:
+            A dictionary containing the initialized parameters.
+
+        Raises:
+            ValueError: If an unknown estimator type is provided.
+        """
         if estimator_type == 'vqa':
             self._init_vqa_params(
                 n_ansatz_params=n_ansatz_params)
@@ -147,7 +217,7 @@ class Estimator:
     """
     def __init__(self):
         self.params = None
-        self._params_initializer = ParametersInitializer()
+        self._params_initializer = EstimatorParameters()
 
     def model_save(
             self,
