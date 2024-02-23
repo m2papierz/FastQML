@@ -22,7 +22,7 @@ Classes:
 - QNNClassifier: Subclass for classification tasks using quantum neural networks.
 """
 
-from typing import Callable
+from typing import Callable, Union, List, Dict, Mapping
 
 import jax
 import numpy as np
@@ -31,10 +31,10 @@ from jax import numpy as jnp
 
 from fast_qml.quantum_circuits.feature_maps import FeatureMap, AmplitudeEmbedding
 from fast_qml.quantum_circuits.variational_forms import VariationalForm
-from fast_qml.core.estimator import QuantumEstimator
+from fast_qml.core.estimator import EstimatorParameters, Estimator
 
 
-class QNN(QuantumEstimator):
+class QNN(Estimator):
     """
     Base class for quantum neural networks, providing the essential components to construct
     a quantum circuit for machine learning tasks.
@@ -59,38 +59,66 @@ class QNN(QuantumEstimator):
             feature_map: FeatureMap,
             ansatz: VariationalForm,
             loss_fn: Callable,
-            optimizer: Callable,
+            optimizer_fn: Callable,
             layers_num: int = 1,
             measurement_op: Callable = qml.PauliZ,
             measurements_num: int = 1,
             data_reuploading: bool = False
     ):
+        super().__init__(
+            loss_fn=loss_fn, optimizer_fn=optimizer_fn, estimator_type='quantum'
+        )
+
+        self._n_qubits = n_qubits
+        self._feature_map = feature_map
+        self._ansatz = ansatz
         self._layers_num = layers_num
         self._data_reuploading = data_reuploading
+        self._measurement_op = measurement_op
+        self._measurements_num = measurements_num
 
+        # Validate measurement operation
+        if not self._is_valid_measurement_op(measurement_op):
+            raise ValueError(
+                "Invalid measurement operation provided."
+            )
+
+        # Validate if data reuploading is possible
         if self._data_reuploading and isinstance(feature_map, AmplitudeEmbedding):
             raise ValueError(
                 "Data reuploading is not compatible with Amplitude Embedding ansatz. PennyLane "
                 "does not allow to use multiple state preparation operations at the moment."
             )
 
-        super().__init__(
-            n_qubits=n_qubits,
-            feature_map=feature_map,
-            ansatz=ansatz,
-            loss_fn=loss_fn,
-            optimizer=optimizer,
-            measurement_op=measurement_op,
-            measurements_num=measurements_num
+        self._device = qml.device(
+            name="default.qubit.jax", wires=self._n_qubits)
+
+        self.params = EstimatorParameters(
+            **self._init_parameters(
+                n_ansatz_params=ansatz.params_num,
+                layers_n=layers_num
+            )
         )
 
-        self.params = self._params_initializer(
-            estimator_type='qnn',
-            layers_n=layers_num,
-            n_ansatz_params=ansatz.params_num
-        )
-        # As we have q_node jitted, we cannot operate with parameters as dictionary
-        self.params = self.params['q_weights']
+    def _init_parameters(
+            self,
+            n_ansatz_params: Union[int, List[int]],
+            layers_n: int
+    ):
+        if isinstance(n_ansatz_params, int):
+            shape = (layers_n, n_ansatz_params)
+        else:
+            shape = (layers_n, *n_ansatz_params)
+
+        weights = 0.1 * jax.random.normal(self._init_rng, shape=shape)
+        return {'q_weights': weights}
+
+    @staticmethod
+    def _is_valid_measurement_op(measurement_op):
+        """
+        Check if the provided measurement operation is valid.
+        """
+        return isinstance(measurement_op(0), qml.operation.Operation)
 
     def _quantum_layer(
             self,
@@ -113,23 +141,26 @@ class QNN(QuantumEstimator):
             self._feature_map.apply(features=x_data)
             self._ansatz.apply(params=weights)
 
-    def q_model(
+    def model(
             self,
-            weights: jnp.ndarray,
-            x_data: jnp.ndarray
-    ) -> qml.qnode:
+            x_data: jnp.ndarray,
+            q_weights: Union[jnp.ndarray, None] = None,
+            c_weights: Union[Dict[str, Mapping[str, jnp.ndarray]], None] = None,
+            batch_stats: Union[Dict[str, Mapping[str, jnp.ndarray]], None] = None,
+            training: Union[bool, None] = None
+    ):
         """
-        Defines the quantum model circuit for the neural network.
-
-        This method creates a PennyLane QNode that constructs the quantum circuit by applying
-        the quantum layer multiple times based on the number of layers specified.
+        Defines estimator model.
 
         Args:
-            weights: Parameters for the variational form.
-            x_data: Input data to be processed by the quantum circuit.
+            x_data: Input data.
+            q_weights: Weights of the quantum model.
+            c_weights: Weights of the classical model.
+            batch_stats: Batch normalization statistics for the classical model.
+            training: Specifies whether the model is being used for training or inference.
 
         Returns:
-            A PennyLane QNode representing the quantum circuit.
+            Outputs of the estimator model.
         """
         @jax.jit
         @qml.qnode(device=self._device, interface="jax")
@@ -139,7 +170,7 @@ class QNN(QuantumEstimator):
 
             for i in range(self._layers_num):
                 self._quantum_layer(
-                    weights=weights[i], x_data=x_data)
+                    weights=q_weights[i], x_data=x_data)
 
             return [
                 qml.expval(self._measurement_op(i))
@@ -166,7 +197,7 @@ class QNN(QuantumEstimator):
                     weights=params[i], x_data=inputs)
 
         aux_input = np.array([aux_input])
-        print(qml.draw(draw_circuit)(self.params, aux_input))
+        print(qml.draw(draw_circuit)(self.params.q_weights, aux_input))
 
 
 class QNNRegressor(QNN):
@@ -181,7 +212,7 @@ class QNNRegressor(QNN):
             feature_map: FeatureMap,
             ansatz: VariationalForm,
             loss_fn: Callable,
-            optimizer: Callable,
+            optimizer_fn: Callable,
             layers_num: int = 1,
             measurement_op: Callable = qml.PauliZ,
             data_reuploading: bool = False
@@ -193,7 +224,7 @@ class QNNRegressor(QNN):
             layers_num=layers_num,
             measurement_op=measurement_op,
             loss_fn=loss_fn,
-            optimizer=optimizer,
+            optimizer_fn=optimizer_fn,
             measurements_num=1,
             data_reuploading=data_reuploading
         )
@@ -209,7 +240,7 @@ class QNNRegressor(QNN):
             x: An array of input data.
         """
         return jnp.array(
-            self.q_model(weights=self.params, x_data=x)
+            self.model(q_weights=self.params.q_weights, x_data=x)
         ).ravel()
 
 
@@ -231,7 +262,7 @@ class QNNClassifier(QNN):
             feature_map: FeatureMap,
             ansatz: VariationalForm,
             loss_fn: Callable,
-            optimizer: Callable,
+            optimizer_fn: Callable,
             classes_num: int,
             layers_num: int = 1,
             measurement_op: Callable = qml.PauliZ,
@@ -250,7 +281,7 @@ class QNNClassifier(QNN):
             layers_num=layers_num,
             measurement_op=measurement_op,
             loss_fn=loss_fn,
-            optimizer=optimizer,
+            optimizer_fn=optimizer_fn,
             measurements_num=measurements_num,
             data_reuploading=data_reuploading
         )
@@ -271,11 +302,12 @@ class QNNClassifier(QNN):
             a single probability for each sample. For multi-class classification, this will be a 2D array
             where each row corresponds to a sample and each column corresponds to a class.
         """
-        logits = jnp.array(self.q_model(self.params, x))
+        logits = self.model(q_weights=self.params.q_weights, x_data=x)
+
         if self.classes_num == 2:
-            return logits.ravel()
+            return jnp.array(logits.ravel())
         else:
-            return logits.T
+            return jnp.array(logits).T
 
     def predict(
             self,
