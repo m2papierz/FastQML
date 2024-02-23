@@ -8,8 +8,7 @@
 #
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
-from typing import (
-    Callable, Union, Any, Tuple, Dict, Mapping)
+from typing import Callable, Union, Tuple, Dict, Mapping
 
 import jax
 import flax.linen as nn
@@ -41,49 +40,18 @@ class ClassicalModel(ClassicalEstimator):
             batch_norm: bool
     ):
         super().__init__(
-            input_shape=input_shape,
             c_model=c_model,
             loss_fn=loss_fn,
             optimizer=optimizer,
             batch_norm=batch_norm
         )
 
-    def _initialize_parameters(
-            self,
-            input_shape: Union[int, Tuple[int], None] = None,
-            batch_norm: Union[bool, None] = None
-    ) -> Union[jnp.ndarray, Dict[str, Any]]:
-        """
-        Initializes parameters for the classical and quantum models.
-
-        Args:
-            input_shape: The shape of the input data.
-            batch_norm: Indicates whether batch normalization is used within the model.
-
-        Returns:
-            A dictionary containing initialized parameters.
-        """
-        if isinstance(input_shape, int):
-            c_inp = jax.random.normal(self._inp_rng, shape=(1, input_shape))
-        else:
-            if not all(isinstance(dim, int) for dim in input_shape):
-                raise ValueError("input_shape must be a tuple or list of integers.")
-
-            c_inp = jax.random.normal(self._inp_rng, shape=(1, *input_shape))
-
-        if batch_norm:
-            variables = self._c_model.init(self._init_rng, c_inp, train=False)
-            weights, batch_stats = variables['params'], variables['batch_stats']
-            return {
-                'weights': weights,
-                'batch_stats': batch_stats
-            }
-        else:
-            variables = self._c_model.init(self._init_rng, c_inp)
-            weights = variables['params']
-            return {
-                'weights': weights
-            }
+        self.params = self._params_initializer(
+            estimator_type='classical',
+            c_model=c_model,
+            input_shape=input_shape,
+            batch_norm=batch_norm
+        )
 
     def _model(
             self,
@@ -163,9 +131,9 @@ class ClassicalRegressor(ClassicalModel):
         """
         if self.batch_norm:
             weights, batch_stats = (
-                self.params['weights'], self.params['batch_stats'])
+                self.params['c_weights'], self.params['batch_stats'])
         else:
-            weights, batch_stats = self.params['weights'], None
+            weights, batch_stats = self.params['c_weights'], None
 
         return jnp.array(
             self._model(
@@ -224,9 +192,9 @@ class ClassicalClassifier(ClassicalModel):
         """
         if self.batch_norm:
             weights, batch_stats = (
-                self.params['weights'], self.params['batch_stats'])
+                self.params['c_weights'], self.params['batch_stats'])
         else:
-            weights, batch_stats = self.params['weights'], None
+            weights, batch_stats = self.params['c_weights'], None
 
         logits = self._model(
             weights=weights, x_data=x,

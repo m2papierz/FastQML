@@ -50,8 +50,8 @@ class ParametersInitializer:
         if isinstance(n_ansatz_params, int):
             shape = [n_ansatz_params]
         else:
-            shape = n_ansatz_params
-        weights = jax.random.normal(self._init_rng, shape=shape)
+            shape = [*n_ansatz_params]
+        weights = 0.1 * jax.random.normal(self._init_rng, shape=shape)
         self.add_parameter(name="q_weights", array=weights)
 
     def _init_qnn_params(
@@ -64,7 +64,7 @@ class ParametersInitializer:
         else:
             shape = (layers_n, *n_ansatz_params)
 
-        weights = jax.random.normal(self._init_rng, shape=shape)
+        weights = 0.1 * jax.random.normal(self._init_rng, shape=shape)
         self.add_parameter(name="q_weights", array=weights)
 
     def _init_classical_params(
@@ -106,7 +106,7 @@ class ParametersInitializer:
         )
         self.add_parameter(name="q_weights", array=q_model_params)
 
-    def init(
+    def __call__(
             self,
             estimator_type: str,
             n_ansatz_params: Union[int, List[int], None] = None,
@@ -232,17 +232,7 @@ class QuantumEstimator(Estimator):
 
         self._device = qml.device(
             name="default.qubit.jax", wires=self._n_qubits)
-        self.params = self._initialize_parameters()
 
-    @abstractmethod
-    def _initialize_parameters(
-            self
-    ) -> Union[jnp.ndarray, Dict[str, Any]]:
-        """
-        Abstract method to initialize parameters of the estimator model. This method must be implemented
-        by subclasses to define how the model parameters should be initialized.
-        """
-        raise NotImplementedError("Subclasses must implement this method.")
 
     @staticmethod
     def _is_valid_measurement_op(measurement_op):
@@ -327,7 +317,6 @@ class ClassicalEstimator(Estimator):
     architectures and functionalities.
 
     Args:
-        input_shape: The shape of the input data.
         c_model: The classical Flax neural network to be trained.
         loss_fn: The loss function used to evaluate the model's performance.
         optimizer: The optimization algorithm.
@@ -335,7 +324,6 @@ class ClassicalEstimator(Estimator):
     """
     def __init__(
             self,
-            input_shape: Union[int, Tuple[int]],
             c_model: nn.Module,
             loss_fn: Callable,
             optimizer: Callable,
@@ -350,20 +338,6 @@ class ClassicalEstimator(Estimator):
 
         self._inp_rng, self._init_rng = jax.random.split(
             jax.random.PRNGKey(seed=42), num=2)
-        self.params = self._initialize_parameters(
-            input_shape=input_shape, batch_norm=batch_norm)
-
-    @abstractmethod
-    def _initialize_parameters(
-            self,
-            input_shape: Union[int, Tuple[int], None] = None,
-            batch_norm: Union[bool, None] = None
-    ) -> Union[jnp.ndarray, Dict[str, Any]]:
-        """
-        Abstract method to initialize parameters of the estimator model. This method must be implemented
-        by subclasses to define how the model parameters should be initialized.
-        """
-        raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
     def _model(
@@ -412,9 +386,9 @@ class ClassicalEstimator(Estimator):
         """
         if self.batch_norm:
             weights, batch_stats = (
-                self.params['weights'], self.params['batch_stats'])
+                self.params['c_weights'], self.params['batch_stats'])
         else:
-            weights, batch_stats = self.params['weights'], None
+            weights, batch_stats = self.params['c_weights'], None
 
         optimizer = ClassicalOptimizer(
             c_params=weights,
@@ -437,7 +411,7 @@ class ClassicalEstimator(Estimator):
             verbose=verbose
         )
 
-        self.params['weights'] = optimizer.parameters
+        self.params['c_weights'] = optimizer.parameters
         self.params['batch_stats'] = optimizer.batch_stats
 
 
@@ -450,13 +424,11 @@ class HybridEstimator(Estimator):
     or vice versa, aiming to leverage the strengths of both quantum and classical approaches.
 
     Args:
-        input_shape: The shape of the input data for the classical component of the hybrid model.
         c_model: The classical model component.
         q_model: The quantum model component, defined as an instance of a QuantumEstimator subclass.
     """
     def __init__(
             self,
-            input_shape,
             c_model: nn.Module,
             q_model: Any
     ):
@@ -470,20 +442,6 @@ class HybridEstimator(Estimator):
 
         self._inp_rng, self._init_rng = jax.random.split(
             jax.random.PRNGKey(seed=42), num=2)
-        self.params = self._initialize_parameters(
-            input_shape=input_shape, batch_norm=self._batch_norm)
-
-    @abstractmethod
-    def _initialize_parameters(
-            self,
-            input_shape: Union[int, Tuple[int], None] = None,
-            batch_norm: Union[bool, None] = None
-    ) -> Union[jnp.ndarray, Dict[str, Any]]:
-        """
-        Abstract method to initialize parameters of the estimator model. This method must be implemented
-        by subclasses to define how the model parameters should be initialized.
-        """
-        raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
     def _model(

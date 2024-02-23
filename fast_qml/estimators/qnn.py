@@ -22,8 +22,7 @@ Classes:
 - QNNClassifier: Subclass for classification tasks using quantum neural networks.
 """
 
-from typing import (
-    Union, Dict, Any, Callable)
+from typing import Callable
 
 import jax
 import numpy as np
@@ -85,24 +84,13 @@ class QNN(QuantumEstimator):
             measurements_num=measurements_num
         )
 
-    def _initialize_parameters(
-            self
-    ) -> Union[jnp.ndarray, Dict[str, Any]]:
-        """
-        Initialize weights for the quantum circuit.
-        """
-        rand_key = jax.random.PRNGKey(42)
-
-        if isinstance(self._ansatz.params_num, int):
-            weights = 0.1 * jax.random.normal(
-                rand_key, shape=(self._layers_num, self._ansatz.params_num))
-        else:
-            if not all(isinstance(dim, int) for dim in self._ansatz.params_num):
-                raise ValueError("input_shape must be a tuple or list of integers.")
-
-            weights = 0.1 * jax.random.normal(
-                rand_key, shape=(self._layers_num, *self._ansatz.params_num))
-        return weights
+        self.params = self._params_initializer(
+            estimator_type='qnn',
+            layers_n=layers_num,
+            n_ansatz_params=ansatz.params_num
+        )
+        # As we have q_node jitted, we cannot operate with parameters as dictionary
+        self.params = self.params['q_weights']
 
     def _quantum_layer(
             self,

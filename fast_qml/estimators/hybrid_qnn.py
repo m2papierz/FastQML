@@ -8,8 +8,7 @@
 #
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
-from typing import (
-    Union, Dict, Any, Tuple, Mapping)
+from typing import Union, Dict, Mapping
 
 import jax
 import flax.linen as nn
@@ -36,57 +35,27 @@ class HybridModel(HybridEstimator):
         input_shape: The shape of the input data for the classical component of the hybrid model.
         c_model: The classical model component.
         q_model: The quantum model component, defined as an instance of a QuantumEstimator subclass.
+        batch_norm: Boolean indicating whether classical model uses batch normalization.
     """
     def __init__(
             self,
             input_shape,
             c_model: nn.Module,
-            q_model: Union[VQRegressor, VQClassifier, QNNRegressor, QNNClassifier]
+            q_model: Union[VQRegressor, VQClassifier, QNNRegressor, QNNClassifier],
+            batch_norm: bool = False
     ):
         super().__init__(
-            input_shape=input_shape,
             c_model=c_model,
             q_model=q_model
         )
 
-    def _initialize_parameters(
-            self,
-            input_shape: Union[int, Tuple[int], None] = None,
-            batch_norm: Union[bool, None] = None
-    ) -> Union[jnp.ndarray, Dict[str, Any]]:
-        """
-        Initializes parameters for classical and quantum models.
-
-        Args:
-            input_shape: The shape of the input data.
-            batch_norm: Indicates whether batch normalization is used within the model.
-
-        Returns:
-            A dictionary containing initialized weights for both classical and quantum models.
-        """
-        if isinstance(input_shape, int):
-            c_inp = jax.random.normal(self._inp_rng, shape=(1, input_shape))
-        else:
-            if not all(isinstance(dim, int) for dim in input_shape):
-                raise ValueError("input_shape must be a tuple or list of integers.")
-
-            c_inp = jax.random.normal(self._inp_rng, shape=(1, *input_shape))
-
-        if batch_norm:
-            variables = self._c_model.init(self._init_rng, c_inp, train=False)
-            c_weights, batch_stats = variables['params'], variables['batch_stats']
-            return {
-                'c_weights': c_weights,
-                'q_weights': self._q_model.params,
-                'batch_stats': batch_stats
-            }
-        else:
-            variables = self._c_model.init(self._init_rng, c_inp)
-            c_weights = variables['params']
-            return {
-                'c_weights': c_weights,
-                'q_weights': self._q_model.params
-            }
+        self.params = self._params_initializer(
+            estimator_type='hybrid',
+            c_model=c_model,
+            q_model_params=q_model.params,
+            input_shape=input_shape,
+            batch_norm=batch_norm
+        )
 
     def _model(
             self,
@@ -145,17 +114,20 @@ class HybridRegressor(HybridModel):
         input_shape: The shape of the input data.
         c_model: The classical neural network model.
         q_model: The quantum regression model.
+        batch_norm: Boolean indicating whether classical model uses batch normalization.
     """
     def __init__(
             self,
             input_shape,
             c_model: nn.Module,
-            q_model: Union[VQRegressor, QNNRegressor]
+            q_model: Union[VQRegressor, QNNRegressor],
+            batch_norm: bool = False
     ):
         super().__init__(
             input_shape=input_shape,
             c_model=c_model,
-            q_model=q_model
+            q_model=q_model,
+            batch_norm=batch_norm
         )
 
     def predict(
@@ -193,17 +165,20 @@ class HybridClassifier(HybridModel):
         input_shape: The shape of the input data.
         c_model: The classical neural network model.
         q_model: The quantum classifier model.
+        batch_norm: Boolean indicating whether classical model uses batch normalization.
     """
     def __init__(
             self,
             input_shape,
             c_model: nn.Module,
-            q_model: Union[VQClassifier, QNNClassifier]
+            q_model: Union[VQClassifier, QNNClassifier],
+            batch_norm: bool = False
     ):
         super().__init__(
             input_shape=input_shape,
             c_model=c_model,
-            q_model=q_model
+            q_model=q_model,
+            batch_norm=batch_norm
         )
 
         self._classes_num = self._q_model.classes_num
