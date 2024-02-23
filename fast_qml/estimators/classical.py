@@ -14,9 +14,9 @@ import jax
 import flax.linen as nn
 from jax import numpy as jnp
 
-from fast_qml.core.estimator import ClassicalEstimator
+from fast_qml.core.estimator import EstimatorParameters, Estimator
 
-class ClassicalModel(ClassicalEstimator):
+class ClassicalEstimator(Estimator):
     """
     Specialized class for constructing and training classical neural network models.
 
@@ -28,7 +28,7 @@ class ClassicalModel(ClassicalEstimator):
         input_shape: The shape of the input data.
         c_model: The classical neural network model.
         loss_fn: The loss function used to evaluate the model.
-        optimizer: The optimization algorithm.
+        optimizer_fn: The optimization algorithm.
         batch_norm: Indicates whether batch normalization is used within the model.
     """
     def __init__(
@@ -36,62 +36,87 @@ class ClassicalModel(ClassicalEstimator):
             input_shape: Union[int, Tuple[int]],
             c_model: nn.Module,
             loss_fn: Callable,
-            optimizer: Callable,
+            optimizer_fn: Callable,
             batch_norm: bool
     ):
         super().__init__(
-            c_model=c_model,
-            loss_fn=loss_fn,
-            optimizer=optimizer,
-            batch_norm=batch_norm
+            loss_fn=loss_fn, optimizer_fn=optimizer_fn, estimator_type='classical'
         )
 
-        self.params = self._params_initializer(
-            estimator_type='classical',
-            c_model=c_model,
-            input_shape=input_shape,
-            batch_norm=batch_norm
+        self.params = EstimatorParameters(
+            **self._init_parameters(
+                c_model=c_model,
+                input_shape=input_shape,
+                batch_norm=batch_norm
+            )
         )
 
-    def _model(
+        self._c_model = c_model
+        self.batch_norm = batch_norm
+
+    def _init_parameters(
             self,
-            weights: Dict[str, Mapping[str, jnp.ndarray]],
-            batch_stats: Union[Dict[str, Mapping[str, jnp.ndarray]], None],
+            c_model: nn.Module,
+            input_shape: Union[int, Tuple[int], None] = None,
+            batch_norm: Union[bool, None] = None
+    ) :
+        if isinstance(input_shape, int):
+            shape = (1, input_shape)
+        else:
+            shape = (1, *input_shape)
+
+        c_inp = jax.random.normal(self._inp_rng, shape=shape)
+
+        if batch_norm:
+            variables = c_model.init(self._init_rng, c_inp, train=False)
+            weights, batch_stats = variables['params'], variables['batch_stats']
+            return {'c_weights': weights, 'batch_stats': batch_stats}
+        else:
+            variables = c_model.init(self._init_rng, c_inp)
+            weights = variables['params']
+            return {'c_weights': weights}
+
+    def model(
+            self,
             x_data: jnp.ndarray,
-            training: bool
+            q_weights: Union[jnp.ndarray, None] = None,
+            c_weights: Union[Dict[str, Mapping[str, jnp.ndarray]], None] = None,
+            batch_stats: Union[Dict[str, Mapping[str, jnp.ndarray]], None] = None,
+            training: Union[bool, None] = None
     ):
         """
-        Defines the classical model inference.
+        Defines estimator model.
 
         Args:
-            weights: Weights of the classical model.
-            batch_stats: Batch statistics for batch normalization.
-            x_data: Input data for the model.
-            training: Boolean flag indicating if training model inference.
+            x_data: Input data.
+            q_weights: Weights of the quantum model.
+            c_weights: Weights of the classical model.
+            batch_stats: Batch normalization statistics for the classical model.
+            training: Specifies whether the model is being used for training or inference.
 
         Returns:
-            The output of the classical model.
+            Outputs of the estimator model.
         """
         def _classical_model():
             if self.batch_norm:
                 if training:
                     c_out, updates = self._c_model.apply(
-                        {'params': weights, 'batch_stats': batch_stats},
+                        {'params': c_weights, 'batch_stats': batch_stats},
                         x_data, train=training, mutable=['batch_stats'])
                     return jax.numpy.array(c_out), updates['batch_stats']
                 else:
                     c_out = self._c_model.apply(
-                        {'params': weights, 'batch_stats': batch_stats},
+                        {'params': c_weights, 'batch_stats': batch_stats},
                         x_data, train=training, mutable=False)
                     return jax.numpy.array(c_out)
             else:
-                c_out = self._c_model.apply({'params': weights}, x_data)
+                c_out = self._c_model.apply({'params': c_weights}, x_data)
                 return jax.numpy.array(c_out)
 
         return _classical_model()
 
 
-class ClassicalRegressor(ClassicalModel):
+class ClassicalRegressor(ClassicalEstimator):
     """
     A classical regressor for regression tasks. This class extends the ClassicalModel for regression
     tasks using classical neural networks.
@@ -100,7 +125,7 @@ class ClassicalRegressor(ClassicalModel):
         input_shape: The shape of the input data.
         c_model: The classical neural network model.
         loss_fn: The loss function used to evaluate the model.
-        optimizer: The optimization algorithm.
+        optimizer_fn: The optimization algorithm.
         batch_norm: Indicates whether batch normalization is used within the model.
     """
     def __init__(
@@ -108,14 +133,14 @@ class ClassicalRegressor(ClassicalModel):
             input_shape: Union[int, Tuple[int]],
             c_model: nn.Module,
             loss_fn: Callable,
-            optimizer: Callable,
+            optimizer_fn: Callable,
             batch_norm: bool
     ):
         super().__init__(
             input_shape=input_shape,
             c_model=c_model,
             loss_fn=loss_fn,
-            optimizer=optimizer,
+            optimizer_fn=optimizer_fn,
             batch_norm=batch_norm
         )
 
@@ -129,20 +154,15 @@ class ClassicalRegressor(ClassicalModel):
         Args:
             x: An array of input data.
         """
-        if self.batch_norm:
-            weights, batch_stats = (
-                self.params['c_weights'], self.params['batch_stats'])
-        else:
-            weights, batch_stats = self.params['c_weights'], None
-
         return jnp.array(
-            self._model(
-                weights=weights, x_data=x,
-                batch_stats=batch_stats, training=False)
+            self.model(
+                c_weights=self.params.c_weights,
+                batch_stats=self.params.batch_stats,
+                x_data=x, training=False)
         ).ravel()
 
 
-class ClassicalClassifier(ClassicalModel):
+class ClassicalClassifier(ClassicalEstimator):
     """
     A classical classifier for classification tasks. This class extends the ClassicalModel for
     classification tasks using classical neural networks.
@@ -151,7 +171,7 @@ class ClassicalClassifier(ClassicalModel):
         input_shape: The shape of the input data.
         c_model: The classical neural network model.
         loss_fn: The loss function used to evaluate the model.
-        optimizer: The optimization algorithm.
+        optimizer_fn: The optimization algorithm.
         batch_norm: Indicates whether batch normalization is used within the model.
         classes_num: Number of classes in the classification problem.
     """
@@ -160,7 +180,7 @@ class ClassicalClassifier(ClassicalModel):
             input_shape: Union[int, Tuple[int]],
             c_model: nn.Module,
             loss_fn: Callable,
-            optimizer: Callable,
+            optimizer_fn: Callable,
             batch_norm: bool,
             classes_num: int
     ):
@@ -168,7 +188,7 @@ class ClassicalClassifier(ClassicalModel):
             input_shape=input_shape,
             c_model=c_model,
             loss_fn=loss_fn,
-            optimizer=optimizer,
+            optimizer_fn=optimizer_fn,
             batch_norm=batch_norm
         )
 
@@ -190,15 +210,10 @@ class ClassicalClassifier(ClassicalModel):
             a single probability for each sample. For multi-class classification, this will be a 2D array
             where each row corresponds to a sample and each column corresponds to a class.
         """
-        if self.batch_norm:
-            weights, batch_stats = (
-                self.params['c_weights'], self.params['batch_stats'])
-        else:
-            weights, batch_stats = self.params['c_weights'], None
-
-        logits = self._model(
-            weights=weights, x_data=x,
-            batch_stats=batch_stats, training=False
+        logits = self.model(
+            c_weights=self.params.c_weights,
+            batch_stats=self.params.batch_stats,
+            x_data=x, training=False
         )
 
         if self.classes_num == 2:
