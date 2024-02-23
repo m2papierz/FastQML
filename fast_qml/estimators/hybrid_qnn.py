@@ -52,7 +52,7 @@ class HybridEstimator(Estimator):
 
         self._c_model = c_model
         self._q_model = q_model
-        self._batch_norm = c_model.batch_norm
+        self._batch_norm = batch_norm
 
         q_weights = q_model.params.q_weights
         self.params = EstimatorParameters(
