@@ -117,7 +117,7 @@ class Optimizer:
             self
     ) -> Dict[str, Any]:
         """
-        Property to retrieve the current parameters of the model as EstimatorParameters instance.
+        Property to retrieve the current parameters of the model as dictionary.
         """
         return {
             'c_weights': self._c_params,
