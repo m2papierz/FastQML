@@ -113,33 +113,18 @@ class Optimizer:
         return cls(*children, **aux_data)
 
     @property
-    def batch_stats(self):
-        """
-        Property to get the current batch statistics.
-        """
-        return self._batch_stats
-
-    @property
     def parameters(
             self
-    ) -> Union[jnp.ndarray, Dict[str, Mapping[str, jnp.ndarray]], Tuple]:
+    ) -> Dict[str, Any]:
         """
-        Property to get the current model parameters.
+        Property to retrieve the current parameters of the model as EstimatorParameters instance.
         """
-        # If both parameters are set return a tuple of both.
-        if self._c_params is not None and self._q_params is not None:
-            return self._c_params, self._q_params
+        return {
+            'c_weights': self._c_params,
+            'q_weights': self._q_params,
+            'batch_stats': self._batch_stats
+        }
 
-        # If only classical parameters are set, return them.
-        if self._c_params is not None:
-            return self._c_params
-
-        # If only quantum parameters are set, return them.
-        if self._q_params is not None:
-            return self._q_params
-
-        # If neither parameter is set raise an error.
-        raise ValueError("No model parameters are set.")
 
     def _create_dataloader(
             self,
@@ -308,7 +293,7 @@ class QuantumOptimizer(Optimizer):
         Returns:
             Computed loss value.
         """
-        predictions = self._model(weights=weights, x_data=x_data)
+        predictions = self._model(q_weights=weights, x_data=x_data)
         predictions = jnp.array(predictions).T
         loss_val = self._loss_fn(predictions, y_data).mean()
         return loss_val
@@ -545,7 +530,7 @@ class ClassicalOptimizer(Optimizer):
             Computed loss value and batch statistics.
         """
         outs = self._model(
-            weights=weights, x_data=x_data,
+            c_weights=weights, x_data=x_data,
             batch_stats=batch_stats, training=training)
 
         if self._batch_stats and training:
