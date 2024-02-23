@@ -18,19 +18,19 @@ leveraging quantum feature maps and variational forms. They are capable of handl
 of loss functions suitable for various machine learning tasks.
 """
 
-from typing import Callable
+from typing import Callable, Union, List, Dict, Mapping
 
 import jax
 import numpy as np
 import pennylane as qml
 from jax import numpy as jnp
 
-from fast_qml.core.estimator import QuantumEstimator
+from fast_qml.core.estimator import EstimatorParameters, Estimator
 from fast_qml.quantum_circuits.feature_maps import FeatureMap, AmplitudeEmbedding
 from fast_qml.quantum_circuits.variational_forms import VariationalForm
 
 
-class VariationalQuantumEstimator(QuantumEstimator):
+class VariationalQuantumEstimator(Estimator):
     """
     A quantum estimator using a variational approach. This class provides the foundation for building
     quantum machine learning models with variational circuits. It initializes the quantum device,
@@ -53,25 +53,51 @@ class VariationalQuantumEstimator(QuantumEstimator):
             ansatz: VariationalForm,
             measurement_op: Callable,
             loss_fn: Callable,
-            optimizer: Callable,
+            optimizer_fn: Callable,
             measurements_num: int
     ):
         super().__init__(
-            n_qubits=n_qubits,
-            feature_map=feature_map,
-            ansatz=ansatz,
-            loss_fn=loss_fn,
-            optimizer=optimizer,
-            measurement_op=measurement_op,
-            measurements_num=measurements_num
+            loss_fn=loss_fn, optimizer_fn=optimizer_fn, estimator_type='quantum'
         )
 
-        self.params = self._params_initializer(
-            estimator_type='vqa',
-            n_ansatz_params=ansatz.params_num
+        # Validate measurement operation
+        if not self._is_valid_measurement_op(measurement_op):
+            raise ValueError("Invalid measurement operation provided.")
+
+        self._n_qubits = n_qubits
+        self._feature_map = feature_map
+        self._ansatz = ansatz
+        self._measurement_op = measurement_op
+        self._measurements_num = measurements_num
+
+        self._device = qml.device(
+            name="default.qubit.jax", wires=self._n_qubits)
+
+        self.params = EstimatorParameters(
+            **self._init_parameters(
+                n_ansatz_params=ansatz.params_num
+            )
         )
-        # As we have q_node jitted, we cannot operate with parameters as dictionary
-        self.params = self.params['q_weights']
+
+    def _init_parameters(
+            self,
+            n_ansatz_params: Union[int, List[int]]
+    ):
+        if isinstance(n_ansatz_params, int):
+            shape = [n_ansatz_params]
+        else:
+            shape = [*n_ansatz_params]
+
+        weights = 0.1 * jax.random.normal(self._init_rng, shape=shape)
+        return {'q_weights': weights}
+
+    @staticmethod
+    def _is_valid_measurement_op(measurement_op):
+        """
+        Check if the provided measurement operation is valid.
+        """
+        return isinstance(measurement_op(0), qml.operation.Operation)
+
 
     def _quantum_layer(
             self,
@@ -91,29 +117,32 @@ class VariationalQuantumEstimator(QuantumEstimator):
         self._feature_map.apply(features=x_data)
         self._ansatz.apply(params=weights)
 
-    def q_model(
+    def model(
             self,
-            weights: jnp.ndarray,
-            x_data: jnp.ndarray
-    ) -> qml.qnode:
+            x_data: jnp.ndarray,
+            q_weights: Union[jnp.ndarray, None] = None,
+            c_weights: Union[Dict[str, Mapping[str, jnp.ndarray]], None] = None,
+            batch_stats: Union[Dict[str, Mapping[str, jnp.ndarray]], None] = None,
+            training: Union[bool, None] = None
+    ):
         """
-        Defines the quantum model circuit to be used in core.
-
-        This method creates a PennyLane QNode that represents the quantum circuit. It applies the quantum layer
-        to the input data and then performs the specified measurements.
+        Defines estimator model.
 
         Args:
-            weights: Parameters for the variational form.
-            x_data: Classical data to be encoded into quantum states.
+            x_data: Input data.
+            q_weights: Weights of the quantum model.
+            c_weights: Weights of the classical model.
+            batch_stats: Batch normalization statistics for the classical model.
+            training: Specifies whether the model is being used for training or inference.
 
         Returns:
-            A PennyLane QNode that outputs the expectation values of the measurement operators.
+            Outputs of the estimator model.
         """
         @jax.jit
         @qml.qnode(device=self._device, interface='jax')
         def _circuit():
             self._quantum_layer(
-                weights=weights, x_data=x_data)
+                weights=q_weights, x_data=x_data)
             return [
                 qml.expval(self._measurement_op(i))
                 for i in range(self._measurements_num)
@@ -134,7 +163,7 @@ class VariationalQuantumEstimator(QuantumEstimator):
             self._quantum_layer(params, inputs)
 
         aux_input = np.array([aux_input])
-        print(qml.draw(draw_circuit)(self.params, aux_input))
+        print(qml.draw(draw_circuit)(self.params.q_weights, aux_input))
 
 
 class VQRegressor(VariationalQuantumEstimator):
@@ -151,7 +180,7 @@ class VQRegressor(VariationalQuantumEstimator):
             feature_map: FeatureMap,
             ansatz: VariationalForm,
             loss_fn: Callable,
-            optimizer: Callable,
+            optimizer_fn: Callable,
             measurement_op: Callable = qml.PauliZ
     ):
         super().__init__(
@@ -159,7 +188,7 @@ class VQRegressor(VariationalQuantumEstimator):
             feature_map=feature_map,
             ansatz=ansatz,
             loss_fn=loss_fn,
-            optimizer=optimizer,
+            optimizer_fn=optimizer_fn,
             measurement_op=measurement_op,
             measurements_num=1
         )
@@ -175,7 +204,7 @@ class VQRegressor(VariationalQuantumEstimator):
             x: An array of input data.
         """
         return jnp.array(
-            self.q_model(weights=self.params, x_data=x)
+            self.model(q_weights=self.params.q_weights, x_data=x)
         ).ravel()
 
 
@@ -197,7 +226,7 @@ class VQClassifier(VariationalQuantumEstimator):
             ansatz: VariationalForm,
             classes_num: int,
             loss_fn: Callable,
-            optimizer: Callable,
+            optimizer_fn: Callable,
             measurement_op: Callable = qml.PauliZ
     ):
         if classes_num == 2:
@@ -211,7 +240,7 @@ class VQClassifier(VariationalQuantumEstimator):
             feature_map=feature_map,
             ansatz=ansatz,
             loss_fn=loss_fn,
-            optimizer=optimizer,
+            optimizer_fn=optimizer_fn,
             measurement_op=measurement_op,
             measurements_num=measurements_num
         )
@@ -232,13 +261,12 @@ class VQClassifier(VariationalQuantumEstimator):
             a single probability for each sample. For multi-class classification, this will be a 2D array
             where each row corresponds to a sample and each column corresponds to a class.
         """
-        logits = jnp.array(
-            self.q_model(weights=self.params, x_data=x))
+        logits = self.model(q_weights=self.params.q_weights, x_data=x)
 
         if self.classes_num == 2:
-            return logits.ravel()
+            return jnp.array(logits.ravel())
         else:
-            return logits.T
+            return jnp.array(logits).T
 
     def predict(
             self,
