@@ -29,7 +29,7 @@ from fast_qml.core.optimizer import (
 @dataclass
 class EstimatorParameters:
     """
-    A class to hold parameters for an estimator.
+    A dataclass to hold parameters for an estimator.
 
     Attributes:
         c_weights: classical model weights
@@ -39,28 +39,6 @@ class EstimatorParameters:
     c_weights: Union[jnp.ndarray, Dict[str, Any]] = None
     q_weights: jnp.ndarray = None
     batch_stats: Union[jnp.ndarray, Dict[str, Any]] = None
-
-    def __post_init__(self):
-        """
-        Validates the parameters after the class is initialized.
-        Ensures that if parameters are provided, they adhere to the expected types.
-        """
-        if self.q_weights is not None and not isinstance(self.q_weights, jnp.ndarray):
-            raise ValueError(
-                "q_weights must be a jax.numpy.ndarray or None."
-            )
-
-        if self.c_weights is not None and not isinstance(self.c_weights, (dict, jnp.ndarray)):
-            raise ValueError(
-                "c_weights must be either a jax.numpy.ndarray, a dictionary, "
-                "or None if not used."
-            )
-
-        if self.batch_stats is not None and not isinstance(self.batch_stats, (dict, jnp.ndarray)):
-            raise ValueError(
-                "batch_stats must be either a jax.numpy.ndarray, a dictionary, "
-                "or None if not used."
-            )
 
 
 class Estimator:
@@ -86,6 +64,15 @@ class Estimator:
 
     @staticmethod
     def _init_trainer(estimator_type: str):
+        """Initializes and returns an optimizer based on the specified estimator type.
+
+        Args:
+            estimator_type: The type of optimizer to initialize. Valid options are
+            'quantum', 'classical', and 'hybrid'.
+
+        Returns:
+            An instance of optimizer based on the estimator type.
+        """
         if estimator_type == 'quantum':
             return QuantumOptimizer
         elif estimator_type == 'classical':
