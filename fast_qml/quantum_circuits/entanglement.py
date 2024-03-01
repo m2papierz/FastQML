@@ -12,7 +12,10 @@
 Module providing functionalities for generating quantum circuit entanglement patterns.
 """
 
-from typing import Any, List, Union
+from typing import Any
+from typing import List
+from typing import Union
+
 import pennylane as qml
 from pennylane.ops.op_math.controlled import ControlledOp
 

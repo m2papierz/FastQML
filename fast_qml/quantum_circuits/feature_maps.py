@@ -14,7 +14,9 @@ Module providing functionalities for feature maps for encoding classical data in
 
 from abc import abstractmethod
 from itertools import combinations
-from typing import Union, Callable
+
+from typing import Any
+from typing import Callable
 
 import pennylane as qml
 from jax import numpy as jnp

@@ -13,7 +13,10 @@ Module providing variational forms.
 """
 
 from abc import abstractmethod
-from typing import Any, Union, Callable, List
+from typing import Any
+from typing import Union
+from typing import Callable
+from typing import List
 
 import pennylane as qml
 from jax import numpy as jnp
