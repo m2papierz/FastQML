@@ -8,15 +8,21 @@
 #
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
-from typing import Union, Dict, Mapping, Tuple
+from typing import Union
+from typing import Dict
+from typing import Mapping
+from typing import Tuple
 
 import jax
 import flax.linen as nn
 from jax import numpy as jnp
 
-from fast_qml.core.estimator import EstimatorParameters, Estimator
-from fast_qml.estimators.qnn import QNNRegressor, QNNClassifier
-from fast_qml.estimators.vqa import VQRegressor, VQClassifier
+from fast_qml.core.estimator import EstimatorParameters
+from fast_qml.core.estimator import Estimator
+from fast_qml.estimators.qnn import QNNRegressor
+from fast_qml.estimators.qnn import QNNClassifier
+from fast_qml.estimators.vqa import VQRegressor
+from fast_qml.estimators.vqa import VQClassifier
 
 
 class HybridEstimator(Estimator):

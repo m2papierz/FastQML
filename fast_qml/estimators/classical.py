@@ -8,13 +8,19 @@
 #
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
-from typing import Callable, Union, Tuple, Dict, Mapping
+from typing import Callable
+from typing import Union
+from typing import Tuple
+from typing import Dict
+from typing import Mapping
 
 import jax
 import flax.linen as nn
 from jax import numpy as jnp
 
-from fast_qml.core.estimator import EstimatorParameters, Estimator
+from fast_qml.core.estimator import EstimatorParameters
+from fast_qml.core.estimator import Estimator
+
 
 class ClassicalEstimator(Estimator):
     """

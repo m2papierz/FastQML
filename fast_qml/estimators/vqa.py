@@ -18,15 +18,21 @@ leveraging quantum feature maps and variational forms. They are capable of handl
 of loss functions suitable for various machine learning tasks.
 """
 
-from typing import Callable, Union, List, Dict, Mapping
+from typing import Callable
+from typing import Union
+from typing import List
+from typing import Dict
+from typing import Mapping
 
 import jax
 import numpy as np
 import pennylane as qml
 from jax import numpy as jnp
 
-from fast_qml.core.estimator import EstimatorParameters, Estimator
-from fast_qml.quantum_circuits.feature_maps import FeatureMap, AmplitudeEmbedding
+from fast_qml.core.estimator import EstimatorParameters
+from fast_qml.core.estimator import Estimator
+from fast_qml.quantum_circuits.feature_maps import FeatureMap
+from fast_qml.quantum_circuits.feature_maps import AmplitudeEmbedding
 from fast_qml.quantum_circuits.variational_forms import VariationalForm
 
 
