@@ -9,10 +9,15 @@
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
 import os
+import dataclasses
 from abc import abstractmethod
 from pathlib import Path
-from dataclasses import dataclass
-from typing import Callable, Union, Dict, Mapping, Any
+
+from typing import Callable
+from typing import Union
+from typing import Dict
+from typing import Mapping
+from typing import Any
 
 import jax
 import torch
@@ -22,11 +27,12 @@ from jax import numpy as jnp
 from torch.utils.data import DataLoader
 
 from fast_qml.core.callbacks import EarlyStopping
-from fast_qml.core.optimizer import (
-    QuantumOptimizer, ClassicalOptimizer, HybridOptimizer)
+from fast_qml.core.optimizer import QuantumOptimizer
+from fast_qml.core.optimizer import ClassicalOptimizer
+from fast_qml.core.optimizer import HybridOptimizer
 
 
-@dataclass
+@dataclasses.dataclass
 class EstimatorParameters:
     """
     A dataclass to hold parameters for an estimator.

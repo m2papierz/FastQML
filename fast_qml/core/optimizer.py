@@ -9,7 +9,12 @@
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
 from abc import abstractmethod
-from typing import  Callable, Tuple, Union, Dict, Mapping, Any
+from typing import Callable
+from typing import Tuple
+from typing import Union
+from typing import Dict
+from typing import Mapping
+from typing import Any
 
 import jax
 import optax
@@ -18,7 +23,8 @@ import numpy as np
 import pennylane as qml
 from jax import numpy as jnp
 
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader
+from torch.utils.data import TensorDataset
 from jax.example_libraries.optimizers import OptimizerState
 from jax.tree_util import register_pytree_node_class
 
