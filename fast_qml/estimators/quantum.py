@@ -175,6 +175,19 @@ class QuantumEstimator(Estimator):
 
 
 class VariationalQuantumEstimator(QuantumEstimator):
+    """
+    A quantum estimator using a variational approach. This class provides the foundation for building
+    quantum machine learning models with variational circuits.
+
+    Args:
+        n_qubits: Number of qubits in the quantum circuit.
+        feature_map: Quantum feature map to encode classical data into quantum states.
+        ansatz: Variational form representing the parameterized quantum circuit.
+        measurement_op: Measurement operator to extract information from the quantum state.
+        loss_fn: Loss function for the training process.
+        measurements_num: Number of wires on which to run measurements.
+    """
+
     def __init__(
             self,
             n_qubits: int,
@@ -347,6 +360,22 @@ class VQClassifier(VariationalQuantumEstimator):
 
 
 class QNN(QuantumEstimator):
+    """
+    Base class for Quantum Neural Networks (QNNs).
+
+    This class supports data reuploading, allowing for a flexible encoding of input data into
+    the quantum circuit, and multiple layers of variational forms for complex model architectures.
+
+    Args:
+        n_qubits: Number of qubits in the quantum circuit.
+        feature_map: Quantum feature map for encoding input data.
+        ansatz: Variational form for the quantum circuit.
+        layers_num: Number of layers in the quantum circuit.
+        measurement_op: Measurement operator for extracting information from the circuit.
+        loss_fn: Loss function for model training.
+        measurements_num: Number of wires on which to run measurements.
+        data_reuploading: Flag to enable or disable data reuploading.
+    """
     def __init__(
             self,
             n_qubits: int,
