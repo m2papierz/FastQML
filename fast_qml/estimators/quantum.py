@@ -96,16 +96,10 @@ class QuantumEstimator(Estimator):
             n_ansatz_params: Union[int, List[int]],
             layers_n: int = None
     ):
-        if layers_n:
-            if isinstance(n_ansatz_params, int):
-                shape = (layers_n, n_ansatz_params)
-            else:
-                shape = (layers_n, *n_ansatz_params)
+        if isinstance(n_ansatz_params, int):
+            shape = (layers_n, n_ansatz_params) if layers_n else [n_ansatz_params]
         else:
-            if isinstance(n_ansatz_params, int):
-                shape = [n_ansatz_params]
-            else:
-                shape = [*n_ansatz_params]
+            shape = (layers_n, *n_ansatz_params) if layers_n else [*n_ansatz_params]
 
         weights = 0.1 * jax.random.normal(self._init_rng, shape=shape)
         return {'q_weights': weights}
