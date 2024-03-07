@@ -15,7 +15,7 @@ Module providing functionalities for feature maps for encoding classical data in
 from abc import abstractmethod
 from itertools import combinations
 
-from typing import Any
+from typing import Union
 from typing import Callable
 
 import pennylane as qml
@@ -31,12 +31,7 @@ class FeatureMap:
     Args:
         n_qubits: Number of qubits in the quantum circuit.
         map_func: Custom mapping function. Defaults to None.
-
-    Attributes:
-        _expected_args: List of expected arguments for the custom mapping function.
     """
-
-    _expected_args = ['features']
 
     def __init__(
             self,
@@ -48,10 +43,10 @@ class FeatureMap:
         if map_func is None:
             self._map_func = self._set_map_func
         else:
-            if not validate_function_args(map_func, self._expected_args):
+            if not validate_function_args(map_func, ['features']):
                 raise ValueError(
                     f"The variational_form function must "
-                    f"have the arguments: {self._expected_args}"
+                    f"have the arguments: {['features']}"
                 )
 
             self._map_func = map_func
@@ -203,6 +198,27 @@ class ZZFeatureMap(FeatureMap):
                 f"less, got length {features.shape[-1]}."
             )
 
+    def _access_features(
+            self,
+            features: jnp.ndarray,
+            idx: int
+    ) -> jnp.ndarray:
+        """
+        Accesses specific features from an array based on the given index. This method selects features
+        from the given array, handling both batched and unbatched scenarios.
+
+        Args:
+            features: The array of features.
+            idx: The index of the feature to access.
+
+        Returns:
+
+        """
+        if self._batched:
+            return features[:, idx]
+        else:
+            return features[idx]
+
     def _set_map_func(
             self,
             features: jnp.ndarray
@@ -213,19 +229,22 @@ class ZZFeatureMap(FeatureMap):
         Args:
             features: Input features.
         """
-        def map_func():
-            self._verify_data_dims(features)
+        self._batched = qml.math.ndim(features) > 1
+        self._verify_data_dims(features)
 
+        def map_func():
             n_load = min(features.shape[-1], self._n_qubits)
             for i in range(n_load):
+                features_ = self._access_features(features, i)
+
                 qml.Hadamard(wires=[i])
-                qml.RZ(2.0 * features[:, i], wires=[i])
+                qml.RZ(2.0 * features_, wires=[i])
 
             for q0, q1 in list(combinations(range(n_load), 2)):
+                f_q0 = self._access_features(features, q0)
+                f_q1 = self._access_features(features, q1)
+
                 qml.CZ(wires=[q0, q1])
-                qml.RZ(
-                    2.0 * (jnp.pi - features[:, q0]) * (jnp.pi - features[:, q1]),
-                    wires=[q1]
-                )
+                qml.RZ( 2.0 * (jnp.pi - f_q0) * (jnp.pi - f_q1), wires=[q1] )
                 qml.CZ(wires=[q0, q1])
         return map_func()
