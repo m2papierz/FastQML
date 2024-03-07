@@ -19,10 +19,10 @@ from jax import numpy as jnp
 
 from fast_qml.core.estimator import EstimatorParameters
 from fast_qml.core.estimator import Estimator
-from fast_qml.estimators.qnn import QNNRegressor
-from fast_qml.estimators.qnn import QNNClassifier
-from fast_qml.estimators.vqa import VQRegressor
-from fast_qml.estimators.vqa import VQClassifier
+from fast_qml.estimators.quantum import QNNRegressor
+from fast_qml.estimators.quantum import QNNClassifier
+from fast_qml.estimators.quantum import VQRegressor
+from fast_qml.estimators.quantum import VQClassifier
 
 
 class HybridEstimator(Estimator):
