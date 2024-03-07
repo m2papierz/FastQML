@@ -126,26 +126,29 @@ class QNN(Estimator):
         """
         return isinstance(measurement_op(0), qml.operation.Operation)
 
-    def _quantum_layer(
+    def _quantum_circuit(
             self,
-            weights: jnp.ndarray,
-            x_data: jnp.ndarray
+            x_data: jnp.ndarray,
+            q_weights: Union[jnp.ndarray, None] = None
     ) -> None:
         """
-        Applies the quantum layer, which includes the feature map and the ansatz, to the circuit.
+        Applies the quantum circuit.
 
         This method is conditional on the data reuploading flag. If data reuploading is enabled,
         the feature map is applied at every layer.
 
         Args:
-            weights: Parameters for the variational form.
             x_data: Input data to be encoded into the quantum state.
+            q_weights: Parameters for the variational form.
         """
         if not self._data_reuploading:
-            self._ansatz.apply(params=weights)
-        else:
             self._feature_map.apply(features=x_data)
-            self._ansatz.apply(params=weights)
+            for i in range(self._layers_num):
+                self._ansatz.apply(params=q_weights[i])
+        else:
+            for i in range(self._layers_num):
+                self._feature_map.apply(features=x_data)
+                self._ansatz.apply(params=q_weights[i])
 
     def model(
             self,
@@ -171,13 +174,7 @@ class QNN(Estimator):
         @jax.jit
         @qml.qnode(device=self._device, interface="jax")
         def _circuit():
-            if not self._data_reuploading:
-                self._feature_map.apply(features=x_data)
-
-            for i in range(self._layers_num):
-                self._quantum_layer(
-                    weights=q_weights[i], x_data=x_data)
-
+            self._quantum_circuit(x_data=x_data, q_weights=q_weights)
             return [
                 qml.expval(self._measurement_op(i))
                 for i in range(self._measurements_num)
@@ -194,16 +191,8 @@ class QNN(Estimator):
         else:
             aux_input = np.random.randn(self._n_qubits)
 
-        def draw_circuit(params, inputs):
-            if not self._data_reuploading:
-                self._feature_map.apply(features=inputs)
-
-            for i in range(self._layers_num):
-                self._quantum_layer(
-                    weights=params[i], x_data=inputs)
-
         aux_input = np.array([aux_input])
-        print(qml.draw(draw_circuit)(self.params.q_weights, aux_input))
+        print(qml.draw(self._quantum_circuit)(aux_input, self.params.q_weights))
 
 
 class QNNRegressor(QNN):
