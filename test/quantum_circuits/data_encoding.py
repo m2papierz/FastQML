@@ -1,7 +1,7 @@
 import numpy as np
 import pennylane as qml
 
-from fast_qml.quantum_circuits.feature_maps import (
+from fast_qml.quantum_circuits.data_encoding import (
     AngleEmbedding, AmplitudeEmbedding, IQPEmbedding, ZZFeatureMap
 )
 

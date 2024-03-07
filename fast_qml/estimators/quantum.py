@@ -31,9 +31,9 @@ import numpy as np
 import pennylane as qml
 from jax import numpy as jnp
 
-from fast_qml.quantum_circuits.feature_maps import FeatureMap
-from fast_qml.quantum_circuits.feature_maps import AmplitudeEmbedding
-from fast_qml.quantum_circuits.variational_forms import VariationalForm
+from fast_qml.quantum_circuits.data_encoding import FeatureMap
+from fast_qml.quantum_circuits.data_encoding import AmplitudeEmbedding
+from fast_qml.quantum_circuits.ansatz import VariationalForm
 from fast_qml.core.estimator import EstimatorParameters
 from fast_qml.core.estimator import Estimator
 
