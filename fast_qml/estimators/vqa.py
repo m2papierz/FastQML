@@ -105,23 +105,23 @@ class VariationalQuantumEstimator(Estimator):
         return isinstance(measurement_op(0), qml.operation.Operation)
 
 
-    def _quantum_layer(
+    def _quantum_circuit(
             self,
-            weights: jnp.ndarray,
-            x_data: jnp.ndarray
+            x_data: jnp.ndarray,
+            q_weights: Union[jnp.ndarray, None] = None,
     ) -> None:
         """
-        Applies the quantum layer consisting of the feature map and the variational form.
+        Applies the quantum circuit consisting of the feature map and the variational form.
 
         This method encodes classical data into quantum states using the specified feature map and
         then applies the variational form with the given weights.
 
         Args:
-            weights: Parameters for the variational form.
             x_data: Classical data to be encoded into quantum states.
+            q_weights: Parameters for the variational form.
         """
         self._feature_map.apply(features=x_data)
-        self._ansatz.apply(params=weights)
+        self._ansatz.apply(params=q_weights)
 
     def model(
             self,
@@ -147,8 +147,7 @@ class VariationalQuantumEstimator(Estimator):
         @jax.jit
         @qml.qnode(device=self._device, interface='jax')
         def _circuit():
-            self._quantum_layer(
-                weights=q_weights, x_data=x_data)
+            self._quantum_circuit(x_data=x_data, q_weights=q_weights)
             return [
                 qml.expval(self._measurement_op(i))
                 for i in range(self._measurements_num)
@@ -165,11 +164,8 @@ class VariationalQuantumEstimator(Estimator):
         else:
             aux_input = np.random.randn(self._n_qubits)
 
-        def draw_circuit(params, inputs):
-            self._quantum_layer(params, inputs)
-
         aux_input = np.array([aux_input])
-        print(qml.draw(draw_circuit)(self.params.q_weights, aux_input))
+        print(qml.draw(self._quantum_circuit)(aux_input, self.params.q_weights, ))
 
 
 class VQRegressor(VariationalQuantumEstimator):
