@@ -46,6 +46,14 @@ class EstimatorParameters:
     q_weights: jnp.ndarray = None
     batch_stats: Union[jnp.ndarray, Dict[str, Any]] = None
 
+    def __post_init__(self):
+        if self.c_weights is not None and not isinstance(self.c_weights, (jnp.ndarray, dict)):
+            raise TypeError("c_weights must be either jnp.ndarray or dict")
+        if self.q_weights is not None and not isinstance(self.q_weights, jnp.ndarray):
+            raise TypeError("q_weights must be jnp.ndarray")
+        if self.batch_stats is not None and not isinstance(self.batch_stats, (jnp.ndarray, dict)):
+            raise TypeError("batch_stats must be either jnp.ndarray or dict")
+
 
 class Estimator:
     """
