@@ -23,6 +23,7 @@ import jax
 import torch
 import pickle
 import numpy as np
+import pennylane as qml
 from jax import numpy as jnp
 from torch.utils.data import DataLoader
 
@@ -98,6 +99,52 @@ class Estimator:
                 f"Invalid optimizer type: {estimator_type},"
                 f" available options are {'quantum', 'classical', 'hybrid'}"
             )
+
+    def _compute_fisher_matrix(
+            self,
+            x: jnp.ndarray
+    ) -> jnp.ndarray:
+        """
+        Computes the Fisher Information Matrix for a given input.
+
+        This method computes the Fisher Information Matrix (FIM) for the model parameters based on the input.
+        The FIM is a way of estimating the amount of information that an observable random variable carries
+        about an unknown parameter upon which the probability of the random variable depends.
+
+        Args:
+            x: The input data for which the Fisher Information Matrix is to be computed.
+
+        Returns:
+            The Fisher Information Matrix, a square array of shape (n_params, n_params), where
+            `n_params` is the number of model outputs (observables).
+        """
+        # Unpack model parameters
+        q_params, c_params, batch_stats = dataclasses.asdict(self.params)
+
+        # Compute model output probabilities
+        proba = self.model(
+            x_data=x, q_weights=q_params,
+            c_weights=c_params, batch_stats=batch_stats,
+            training=False, q_model_probs=True)
+
+        # Compute derivatives of probabilities in regard to model parameters
+        proba_d = jax.jacfwd(
+            self.model)(x, q_params, c_params, batch_stats, False, True)
+
+        # Exclude zero values and calculate 1 / proba
+        non_zeros_proba = qml.math.where(
+            proba > 0, proba, qml.math.ones_like(proba))
+        one_over_proba = qml.math.where(
+            proba > 0, qml.math.ones_like(proba), qml.math.zeros_like(proba))
+        one_over_proba = one_over_proba / non_zeros_proba
+
+        # Cast, reshape, and transpose matrix to get (n_params, n_params) array
+        proba_d = qml.math.cast_like(proba_d, proba)
+        proba_d = qml.math.reshape(proba_d, (len(proba), -1))
+        proba_d_over_p = qml.math.transpose(proba_d) * one_over_proba
+
+        # Return resulting Fisher matrix
+        return proba_d_over_p @ proba_d
 
     @abstractmethod
     def model(
