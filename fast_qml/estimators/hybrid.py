@@ -105,7 +105,8 @@ class HybridEstimator(Estimator):
             q_weights: Union[jnp.ndarray, None] = None,
             c_weights: Union[Dict[str, Mapping[str, jnp.ndarray]], None] = None,
             batch_stats: Union[Dict[str, Mapping[str, jnp.ndarray]], None] = None,
-            training: Union[bool, None] = None
+            training: Union[bool, None] = None,
+            q_model_probs: Union[bool] = False
     ):
         """
         Defines estimator model.
@@ -115,7 +116,8 @@ class HybridEstimator(Estimator):
             q_weights: Weights of the quantum model.
             c_weights: Weights of the classical model.
             batch_stats: Batch normalization statistics for the classical model.
-            training: Specifies whether the model is being used for training or inference.
+            training: Indicates whether the model is being used for training or inference.
+            q_model_probs: Indicates whether the quantum model shall return probabilities.
 
         Returns:
             Outputs of the estimator model.
@@ -127,19 +129,25 @@ class HybridEstimator(Estimator):
                         {'params': c_weights, 'batch_stats': batch_stats},
                         x_data, train=training, mutable=['batch_stats'])
                     q_out = self._q_model.model(
-                        q_weights=q_weights, x_data=jax.numpy.array(c_out))
+                        q_weights=q_weights,
+                        x_data=jax.numpy.array(c_out),
+                        q_model_probs=q_model_probs)
                     return jax.numpy.array(q_out), updates['batch_stats']
                 else:
                     c_out = self._c_model.apply(
                         {'params': c_weights, 'batch_stats': batch_stats},
                         x_data, train=training, mutable=False)
                     q_out = self._q_model.model(
-                        q_weights=q_weights, x_data=jax.numpy.array(c_out))
+                        q_weights=q_weights,
+                        x_data=jax.numpy.array(c_out),
+                        q_model_probs=q_model_probs)
                     return jax.numpy.array(q_out)
             else:
                 c_out = self._c_model.apply({'params': c_weights}, x_data)
                 q_out = self._q_model.model(
-                    q_weights=q_weights, x_data=jax.numpy.array(c_out))
+                    q_weights=q_weights,
+                    x_data=jax.numpy.array(c_out),
+                    q_model_probs=q_model_probs)
                 return jax.numpy.array(q_out)
 
         return _hybrid_model()

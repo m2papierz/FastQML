@@ -106,7 +106,8 @@ class Estimator:
             q_weights: Union[jnp.ndarray, None] = None,
             c_weights: Union[Dict[str, Mapping[str, jnp.ndarray]], None] = None,
             batch_stats: Union[Dict[str, Mapping[str, jnp.ndarray]], None] = None,
-            training: Union[bool, None] = None
+            training: Union[bool, None] = None,
+            q_model_probs: Union[bool] = False
     ):
         """
         Abstract method for defining estimator model.

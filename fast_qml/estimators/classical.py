@@ -88,7 +88,8 @@ class ClassicalEstimator(Estimator):
             q_weights: Union[jnp.ndarray, None] = None,
             c_weights: Union[Dict[str, Mapping[str, jnp.ndarray]], None] = None,
             batch_stats: Union[Dict[str, Mapping[str, jnp.ndarray]], None] = None,
-            training: Union[bool, None] = None
+            training: Union[bool, None] = None,
+            q_model_probs: Union[bool] = False
     ):
         """
         Defines estimator model.
@@ -98,7 +99,8 @@ class ClassicalEstimator(Estimator):
             q_weights: Weights of the quantum model.
             c_weights: Weights of the classical model.
             batch_stats: Batch normalization statistics for the classical model.
-            training: Specifies whether the model is being used for training or inference.
+            training: Indicates whether the model is being used for training or inference.
+            q_model_probs: Indicates whether the quantum model shall return probabilities.
 
         Returns:
             Outputs of the estimator model.

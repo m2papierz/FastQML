@@ -135,7 +135,8 @@ class QuantumEstimator(Estimator):
             q_weights: Union[jnp.ndarray, None] = None,
             c_weights: Union[Dict[str, Mapping[str, jnp.ndarray]], None] = None,
             batch_stats: Union[Dict[str, Mapping[str, jnp.ndarray]], None] = None,
-            training: Union[bool, None] = None
+            training: Union[bool, None] = None,
+            q_model_probs: Union[bool] = False
     ):
         """
         Defines estimator model.
@@ -145,7 +146,8 @@ class QuantumEstimator(Estimator):
             q_weights: Weights of the quantum model.
             c_weights: Weights of the classical model.
             batch_stats: Batch normalization statistics for the classical model.
-            training: Specifies whether the model is being used for training or inference.
+            training: Indicates whether the model is being used for training or inference.
+            q_model_probs: Indicates whether the quantum model shall return probabilities.
 
         Returns:
             Outputs of the estimator model.
@@ -153,11 +155,16 @@ class QuantumEstimator(Estimator):
         @jax.jit
         @qml.qnode(device=self._device, interface="jax")
         def _circuit():
-            self._quantum_circuit(x_data=x_data, q_weights=q_weights)
-            return [
-                qml.expval(self._measurement_op(i))
-                for i in range(self._measurements_num)
-            ]
+            self._quantum_circuit(
+                x_data=x_data, q_weights=q_weights)
+
+            if not q_model_probs:
+                return [
+                    qml.expval(self._measurement_op(i))
+                    for i in range(self._measurements_num)
+                ]
+            else:
+                return qml.probs(wires=range(self._n_qubits))
         return _circuit()
 
     def draw_circuit(self) -> None:
