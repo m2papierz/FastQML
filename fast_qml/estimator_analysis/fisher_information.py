@@ -25,7 +25,9 @@ class FisherInformation:
     """
     Class encapsulating computation of the Fisher Information Matrix (FIM).
 
-    See:  Abbas et al., "The power of quantum neural networks." <https://arxiv.org/pdf/2011.00027.pdf>
+    For reference, see:
+    Abbas et al., "The power of quantum neural networks."
+    <https://arxiv.org/pdf/2011.00027.pdf>
     """
     def __init__(
             self,
@@ -118,7 +120,6 @@ class FisherInformation:
         fim = jnp.mean(_compute_fisher_matrix_batched(x_data), axis=0)
 
         # Normalize FIM
-        estimator_params_num = self._estimator.params.params_num
-        fisher_inf_norm = fim * estimator_params_num / jnp.trace(fim)
+        fisher_inf_norm = fim * len(fim) / jnp.trace(fim)
 
         return fisher_inf_norm
