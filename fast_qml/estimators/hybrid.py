@@ -17,7 +17,6 @@ import jax
 import flax.linen as nn
 from jax import numpy as jnp
 
-from fast_qml.core.estimator import EstimatorParameters
 from fast_qml.core.estimator import Estimator
 from fast_qml.estimators.quantum import QNNRegressor
 from fast_qml.estimators.quantum import QNNClassifier
@@ -50,49 +49,61 @@ class HybridEstimator(Estimator):
             q_model: Union[VQRegressor, VQClassifier, QNNRegressor, QNNClassifier],
             batch_norm: bool = False
     ):
-        super().__init__(
-            loss_fn=q_model.loss_fn,
-            optimizer_fn=q_model.optimizer_fn,
-            estimator_type='hybrid'
-        )
-
         self._c_model = c_model
         self._q_model = q_model
         self._batch_norm = batch_norm
-
         q_weights = q_model.params.q_weights
-        self.params = EstimatorParameters(
-            **self._init_parameters(
-                c_model=c_model,
-                q_weights=q_weights,
-                input_shape=input_shape,
-                batch_norm=batch_norm
-            )
+
+        super().__init__(
+            loss_fn=q_model.loss_fn,
+            optimizer_fn=q_model.optimizer_fn,
+            estimator_type='hybrid',
+            init_args={
+                'c_model': c_model,
+                'q_weights': q_weights,
+                'input_shape': input_shape,
+                'batch_norm': batch_norm
+            }
         )
 
-    def _init_parameters(
+    def _sample_parameters(
             self,
             c_model: nn.Module,
             q_weights: Union[int, Tuple[int]],
             input_shape: Union[int, Tuple[int], None] = None,
             batch_norm: Union[bool, None] = None
     ):
+        """
+        Samples randomly estimator parameters.
+
+        Args:
+            c_model: The classical model component.
+            q_weights: The weights of the quantum model.
+            input_shape: The shape of the input data for the classical component of the hybrid model.
+            batch_norm: Boolean indicating whether classical model uses batch normalization.
+
+        Returns:
+            Dictionary with sampled parameters.
+        """
+        inp_rng, init_rng = jax.random.split(
+            jax.random.PRNGKey(seed=self.random_seed), num=2)
+
         if isinstance(input_shape, int):
             shape = (1, input_shape)
         else:
             shape = (1, *input_shape)
 
-        c_inp = jax.random.normal(self._inp_rng, shape=shape)
+        c_inp = jax.random.normal(inp_rng, shape=shape)
 
         if batch_norm:
-            variables = c_model.init(self._init_rng, c_inp, train=False)
+            variables = c_model.init(init_rng, c_inp, train=False)
             weights, batch_stats = variables['params'], variables['batch_stats']
             return {
                 'c_weights': weights,
                 'q_weights': q_weights,
                 'batch_stats': batch_stats}
         else:
-            variables = c_model.init(self._init_rng, c_inp)
+            variables = c_model.init(init_rng, c_inp)
             weights = variables['params']
             return {
                 'c_weights': weights,

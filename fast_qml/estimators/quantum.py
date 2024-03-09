@@ -34,7 +34,6 @@ from jax import numpy as jnp
 from fast_qml.quantum_circuits.data_encoding import FeatureMap
 from fast_qml.quantum_circuits.data_encoding import AmplitudeEmbedding
 from fast_qml.quantum_circuits.ansatz import VariationalForm
-from fast_qml.core.estimator import EstimatorParameters
 from fast_qml.core.estimator import Estimator
 
 
@@ -64,16 +63,20 @@ class QuantumEstimator(Estimator):
             measurement_op: Callable = qml.PauliZ,
             measurements_num: int = 1
     ):
-        super().__init__(
-            loss_fn=loss_fn, optimizer_fn=optimizer_fn, estimator_type='quantum'
-        )
-
         self._n_qubits = n_qubits
         self._feature_map = feature_map
         self._ansatz = ansatz
         self._layers_num = layers_num
         self._measurement_op = measurement_op
         self._measurements_num = measurements_num
+
+        super().__init__(
+            loss_fn=loss_fn, optimizer_fn=optimizer_fn, estimator_type='quantum',
+            init_args={
+                'n_ansatz_params': ansatz.params_num,
+                'layers_n': layers_num
+            }
+        )
 
         # Validate measurement operation
         if not self._is_valid_measurement_op(measurement_op):
@@ -84,24 +87,30 @@ class QuantumEstimator(Estimator):
         self._device = qml.device(
             name="default.qubit.jax", wires=self._n_qubits)
 
-        self.params = EstimatorParameters(
-            **self._init_parameters(
-                n_ansatz_params=ansatz.params_num,
-                layers_n=layers_num
-            )
-        )
-
-    def _init_parameters(
+    def _sample_parameters(
             self,
             n_ansatz_params: Union[int, List[int]],
             layers_n: int = None
     ):
+        """
+        Samples randomly estimator parameters.
+
+        Args:
+            n_ansatz_params: The number of parameters of the ansatz.
+            layers_n: Number of layers in the quantum circuit.
+
+        Returns:
+            Dictionary with sampled parameters.
+        """
+
+        key = jax.random.PRNGKey(self.random_seed)
+
         if isinstance(n_ansatz_params, int):
             shape = (layers_n, n_ansatz_params) if layers_n else [n_ansatz_params]
         else:
             shape = (layers_n, *n_ansatz_params) if layers_n else [*n_ansatz_params]
 
-        weights = 0.1 * jax.random.normal(self._init_rng, shape=shape)
+        weights = 0.1 * jax.random.normal(key, shape=shape)
         return {'q_weights': weights}
 
     @staticmethod

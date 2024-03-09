@@ -61,19 +61,23 @@ class Estimator:
     for  implementing machine learning estimators with basic functionalities of model training, saving,
     and loading.
     """
+    random_seed: int = 0
+
     def __init__(
             self,
             loss_fn: Callable,
             optimizer_fn: Callable,
-            estimator_type: str
+            estimator_type: str,
+            init_args: Dict[str, Any]
     ):
         self.loss_fn = loss_fn
         self.optimizer_fn = optimizer_fn
+        self._init_args = init_args
 
-        self.params = EstimatorParameters()
-        self._inp_rng, self._init_rng = jax.random.split(
-            jax.random.PRNGKey(seed=42), num=2)
+        # Initiate parameters
+        self.init_parameters()
 
+        # Initiate estimator optimizer
         self._trainer = self._init_trainer(estimator_type)
 
     @staticmethod
@@ -98,6 +102,26 @@ class Estimator:
                 f"Invalid optimizer type: {estimator_type},"
                 f" available options are {'quantum', 'classical', 'hybrid'}"
             )
+
+    def init_parameters(self):
+        """
+        Initiates estimator model parameters.
+        """
+        # As implements an explicit PRNG, we need to artificially change random seed, in order to
+        # achiever pseudo sampling, allowing to get different numbers each time we sample parameters
+        self.random_seed += 1
+
+        # Initiate estimator parameters with sampled numbers
+        self.params = EstimatorParameters(
+            **self._sample_parameters(**self._init_args)
+        )
+
+    @abstractmethod
+    def _sample_parameters(self, **kwargs):
+        """
+        Abstract method for sampling estimator parameters.
+        """
+        raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
     def model(
