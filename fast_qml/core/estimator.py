@@ -54,6 +54,15 @@ class EstimatorParameters:
         if self.batch_stats is not None and not isinstance(self.batch_stats, (jnp.ndarray, dict)):
             raise TypeError("batch_stats must be either jnp.ndarray or dict")
 
+    @property
+    def params_num(self) -> int:
+        total_params = 0
+        if self.c_weights is not None:
+            total_params += sum(x.size for x in jax.tree_leaves(self.c_weights))
+        if self.q_weights is not None:
+            total_params += len(self.q_weights)
+        return total_params
+
 
 class Estimator:
     """
