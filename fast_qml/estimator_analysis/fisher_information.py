@@ -110,8 +110,6 @@ class FisherInformation:
         Returns:
             The normalized Fisher Information Matrix, averaged over the input batch of data.
         """
-
-
         # Create batched version of fisher matrix computation
         _compute_fisher_matrix_batched = vmap(
             self._compute_fisher_matrix, in_axes=0)
