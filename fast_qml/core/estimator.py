@@ -23,8 +23,6 @@ import jax
 import torch
 import pickle
 import numpy as np
-import pennylane as qml
-from jax import vmap
 from jax import numpy as jnp
 from torch.utils.data import DataLoader
 
@@ -167,80 +165,6 @@ class Estimator:
         )
 
         self.params = EstimatorParameters(**trainer.parameters)
-
-    def _compute_fisher_matrix(
-            self,
-            x: jnp.ndarray,
-            q_params,
-            c_params,
-            batch_stats
-    ) -> jnp.ndarray:
-        """
-        Computes the Fisher Information Matrix for a given input.
-
-        This method computes the Fisher Information Matrix (FIM) for the model parameters based on the input.
-        The FIM is a way of estimating the amount of information that an observable random variable carries
-        about an unknown parameter upon which the probability of the random variable depends.
-
-        Args:
-            x: The input data for which the Fisher Information Matrix is to be computed.
-
-        Returns:
-            The Fisher Information Matrix, a square array of shape (n_params, n_params), where
-            `n_params` is the number of model outputs (observables).
-        """
-        # Compute model output probabilities
-        proba = self.model(
-            x_data=x, q_weights=q_params,
-            c_weights=c_params, batch_stats=batch_stats,
-            training=False, q_model_probs=True)
-
-        # Compute derivatives of probabilities in regard to model parameters
-        proba_d = jax.jacfwd(
-            self.model)(x, q_params, c_params, batch_stats, False, True)
-
-        # Exclude zero values and calculate 1 / proba
-        non_zeros_proba = qml.math.where(
-            proba > 0, proba, qml.math.ones_like(proba))
-        one_over_proba = qml.math.where(
-            proba > 0, qml.math.ones_like(proba), qml.math.zeros_like(proba))
-        one_over_proba = one_over_proba / non_zeros_proba
-
-        # Cast, reshape, and transpose matrix to get (n_params, n_params) array
-        proba_d = qml.math.cast_like(proba_d, proba)
-        proba_d = qml.math.reshape(proba_d, (len(proba), -1))
-        proba_d_over_p = qml.math.transpose(proba_d) * one_over_proba
-
-        return proba_d_over_p @ proba_d
-
-    def fisher_information(
-            self,
-            x_data: jnp.ndarray
-    ) -> jnp.ndarray:
-        """
-        Computes the normalized Fisher Information Matrix (FIM) averaged over a batch of data.
-
-        Args:
-            x_data: The input data, a batch of observations for which the Fisher Information Matrix is
-            to be computed.
-
-        Returns:
-            The normalized Fisher Information Matrix, averaged over the input batch of data.
-        """
-        # Unpack model parameters
-        c_params, q_params, batch_stats = dataclasses.asdict(self.params).values()
-
-        # Create batched version of fisher matrix computation
-        _compute_fisher_matrix_batched = vmap(
-            self._compute_fisher_matrix, in_axes=(0, None, None, None))
-
-        # Compute FIM average over the given data
-        fim = jnp.mean(_compute_fisher_matrix_batched(
-            x_data, q_params, c_params, batch_stats), axis=0)
-        fisher_inf_norm = (fim - np.min(fim)) / (np.max(fim) - np.min(fim))
-
-        return fisher_inf_norm
-
 
     def model_save(
             self,
