@@ -60,7 +60,7 @@ class EstimatorParameters:
         if self.c_weights is not None:
             total_params += sum(x.size for x in jax.tree_leaves(self.c_weights))
         if self.q_weights is not None:
-            total_params += len(self.q_weights)
+            total_params += len(jnp.squeeze(self.q_weights))
         return total_params
 
 
@@ -119,7 +119,7 @@ class Estimator:
         """
         # As implements an explicit PRNG, we need to artificially change random seed, in order to
         # achiever pseudo sampling, allowing to get different numbers each time we sample parameters
-        self.random_seed += 1
+        # self.random_seed += 1
 
         # Initiate estimator parameters with sampled numbers
         self.params = EstimatorParameters(
