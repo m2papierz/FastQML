@@ -45,6 +45,7 @@ class EstimatorParameters:
     c_weights: Union[jnp.ndarray, Dict[str, Any]] = None
     q_weights: jnp.ndarray = None
     batch_stats: Union[jnp.ndarray, Dict[str, Any]] = None
+    total_params: int = 0
 
     def __post_init__(self):
         if self.c_weights is not None and not isinstance(self.c_weights, (jnp.ndarray, dict)):
@@ -54,14 +55,10 @@ class EstimatorParameters:
         if self.batch_stats is not None and not isinstance(self.batch_stats, (jnp.ndarray, dict)):
             raise TypeError("batch_stats must be either jnp.ndarray or dict")
 
-    @property
-    def params_num(self) -> int:
-        total_params = 0
         if self.c_weights is not None:
-            total_params += sum(x.size for x in jax.tree_leaves(self.c_weights))
+            self.total_params += sum(x.size for x in jax.tree_leaves(self.c_weights))
         if self.q_weights is not None:
-            total_params += len(jnp.squeeze(self.q_weights))
-        return total_params
+            self.total_params += len(jnp.squeeze(self.q_weights))
 
 
 class Estimator:

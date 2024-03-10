@@ -32,7 +32,7 @@ class EffectiveDimension:
             estimator: Estimator
     ):
         self._fi = FisherInformation(estimator)
-        self._estimator_params_num = estimator.params.params_num
+        self._estimator_params_num = estimator.params.total_params
 
     def get_effective_dimension(
             self,
