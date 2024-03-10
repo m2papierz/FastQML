@@ -15,11 +15,11 @@ An implementation of the Fisher Information Matrix (FIM).
 from dataclasses import asdict
 
 import jax
-import pennylane as qml
-import jax.numpy as jnp
 from jax import vmap
+import jax.numpy as jnp
 
 from fast_qml.core.estimator import Estimator
+
 
 class FisherInformation:
     """
@@ -85,16 +85,16 @@ class FisherInformation:
         proba, proba_d = self._get_proba_and_grads(x=x)
 
         # Exclude zero values and calculate 1 / proba
-        non_zeros_proba = qml.math.where(
-            proba > 0, proba, qml.math.ones_like(proba))
-        one_over_proba = qml.math.where(
-            proba > 0, qml.math.ones_like(proba), qml.math.zeros_like(proba))
+        non_zeros_proba = jnp.where(
+            proba > 0, proba, jnp.ones_like(proba))
+        one_over_proba = jnp.where(
+            proba > 0, jnp.ones_like(proba), jnp.zeros_like(proba))
         one_over_proba = one_over_proba / non_zeros_proba
 
         # Cast, reshape, and transpose matrix to get (n_params, n_params) array
-        proba_d = qml.math.cast_like(proba_d, proba)
-        proba_d = qml.math.reshape(proba_d, (len(proba), -1))
-        proba_d_over_p = qml.math.transpose(proba_d) * one_over_proba
+        proba_d = jnp.asarray(proba_d, dtype=proba.dtype)
+        proba_d = jnp.reshape(proba_d, newshape=(len(proba), -1))
+        proba_d_over_p = jnp.transpose(proba_d) * one_over_proba
 
         return proba_d_over_p @ proba_d
 
