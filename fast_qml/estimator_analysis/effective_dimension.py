@@ -32,6 +32,7 @@ class EffectiveDimension:
             estimator: Estimator
     ):
         self._fi = FisherInformation(estimator)
+        self._estimator_params_num = estimator.params.params_num
 
     def get_effective_dimension(
             self,
@@ -62,5 +63,6 @@ class EffectiveDimension:
         numerator = logsumexp(det_log, axis=None) - jnp.log(len(fim))
         denominator = jnp.log(dataset_size / (2 * jnp.pi * jnp.log(dataset_size)))
         effective_dims = jnp.squeeze(2 * numerator / denominator)
+        effective_dims = effective_dims / self._estimator_params_num
 
         return float(effective_dims)
