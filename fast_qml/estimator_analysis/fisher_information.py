@@ -12,6 +12,7 @@
 An implementation of the Fisher Information Matrix (FIM).
 """
 
+from functools import partial
 from dataclasses import asdict
 
 import jax
@@ -98,6 +99,7 @@ class FisherInformation:
 
         return proba_d_over_p @ proba_d
 
+    @partial(jax.jit, static_argnums=0)
     def fisher_information(
             self,
             x_data: jnp.ndarray
