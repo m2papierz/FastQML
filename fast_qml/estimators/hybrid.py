@@ -139,6 +139,7 @@ class HybridEstimator(Estimator):
                     c_out, updates = self._c_model.apply(
                         {'params': c_weights, 'batch_stats': batch_stats},
                         x_data, train=training, mutable=['batch_stats'])
+                    c_out = c_out[0] if q_model_probs else c_out
                     q_out = self._q_model.model(
                         q_weights=q_weights,
                         x_data=jax.numpy.array(c_out),
@@ -148,6 +149,7 @@ class HybridEstimator(Estimator):
                     c_out = self._c_model.apply(
                         {'params': c_weights, 'batch_stats': batch_stats},
                         x_data, train=training, mutable=False)
+                    c_out = c_out[0] if q_model_probs else c_out
                     q_out = self._q_model.model(
                         q_weights=q_weights,
                         x_data=jax.numpy.array(c_out),
@@ -155,6 +157,7 @@ class HybridEstimator(Estimator):
                     return jax.numpy.array(q_out)
             else:
                 c_out = self._c_model.apply({'params': c_weights}, x_data)
+                c_out = c_out[0] if q_model_probs else c_out
                 q_out = self._q_model.model(
                     q_weights=q_weights,
                     x_data=jax.numpy.array(c_out),

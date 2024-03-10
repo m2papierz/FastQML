@@ -121,15 +121,20 @@ class ClassicalEstimator(Estimator):
                     c_out, updates = self._c_model.apply(
                         {'params': c_weights, 'batch_stats': batch_stats},
                         x_data, train=training, mutable=['batch_stats'])
-                    return jax.numpy.array(c_out), updates['batch_stats']
+                    output = jax.numpy.array(c_out), updates['batch_stats']
                 else:
                     c_out = self._c_model.apply(
                         {'params': c_weights, 'batch_stats': batch_stats},
                         x_data, train=training, mutable=False)
-                    return jax.numpy.array(c_out)
+                    output = jax.numpy.array(c_out)
             else:
                 c_out = self._c_model.apply({'params': c_weights}, x_data)
-                return jax.numpy.array(c_out)
+                output = jax.numpy.array(c_out)
+
+            if q_model_probs:
+                return output[0]
+            else:
+                return output
 
         return _classical_model()
 
