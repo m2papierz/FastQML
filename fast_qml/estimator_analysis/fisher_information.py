@@ -54,7 +54,12 @@ class FisherInformation:
         """
         # Sample new set of model parameters and unpack them
         self._estimator.init_parameters()
-        c_params, q_params, batch_stats = asdict(self._estimator.params).values()
+        c_params, q_params, batch_stats, _ = asdict(self._estimator.params).values()
+
+        # Ensure that input dimension is correct of the classical estimator component
+        if self._estimator.input_shape is not None:
+            if len(x.shape) < len(self._estimator.input_shape):
+                x = jnp.expand_dims(x, axis=0)
 
         # Compute model output probabilities
         proba = self._estimator.model(
@@ -119,7 +124,7 @@ class FisherInformation:
             self._compute_fisher_matrix, in_axes=0)
 
         # Compute FIM average over the given data
-        fim = jnp.mean(_compute_fisher_matrix_batched(x_data), axis=0)
+        fim = jnp.nanmean(_compute_fisher_matrix_batched(x_data), axis=0)
 
         # Normalize FIM
         fisher_inf_norm = fim * len(fim) / jnp.trace(fim)
