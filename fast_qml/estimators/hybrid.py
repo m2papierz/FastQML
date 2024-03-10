@@ -89,11 +89,11 @@ class HybridEstimator(Estimator):
             jax.random.PRNGKey(seed=self.random_seed), num=2)
 
         if isinstance(input_shape, int):
-            shape = (1, input_shape)
+            self.input_shape = (1, input_shape)
         else:
-            shape = (1, *input_shape)
+            self.input_shape = (1, *input_shape)
 
-        c_inp = jax.random.normal(inp_rng, shape=shape)
+        c_inp = jax.random.normal(inp_rng, shape=self.input_shape)
 
         if batch_norm:
             variables = c_model.init(init_rng, c_inp, train=False)

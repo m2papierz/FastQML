@@ -82,6 +82,7 @@ class Estimator:
         self.loss_fn = loss_fn
         self.optimizer_fn = optimizer_fn
         self._init_args = init_args
+        self.input_shape = None
 
         # Initiate parameters
         self.init_parameters()
