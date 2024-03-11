@@ -12,6 +12,7 @@
 An implementation of the estimator Effective Dimension.
 """
 
+from typing import Union
 import jax.numpy as jnp
 
 from scipy.special import logsumexp
@@ -29,10 +30,28 @@ class EffectiveDimension:
     """
     def __init__(
             self,
-            estimator: Estimator
+            estimator: Estimator,
+            fisher_information_matrix: Union[jnp.ndarray, None] = None
     ):
-        self._fi = FisherInformation(estimator)
-        self._estimator_params_num = estimator.params.total_params
+        self._estimator = estimator
+        self._fim = fisher_information_matrix
+
+    def _set_fisher_matrix(
+            self,
+            x_data: jnp.ndarray
+    ) -> None:
+        """
+        Computes the fisher information matrix if it was not provided.
+
+        Args:
+            x_data: The input data for which the Fisher Information Matrix is to be computed.
+
+        Returns:
+            The normalized Fisher Information Matrix, averaged over the input data.
+        """
+        if self._fim is None:
+            fi = FisherInformation(self._estimator)
+            self._fim = fi.fisher_information(x_data)
 
     def get_effective_dimension(
             self,
@@ -50,19 +69,19 @@ class EffectiveDimension:
             Effective dimension for a given estimator and dataset.
         """
         dataset_size = jnp.array(x_data.shape[0])
-        fim = self._fi.fisher_information(x_data)
+        self._set_fisher_matrix(x_data)
 
         # Matrix of which determinant will be calculated incorporating FIM
-        fim_mod = fim * dataset_size / (2 * jnp.pi * jnp.log(dataset_size))
-        one_plus_fmod = jnp.eye(len(fim)) + fim_mod
+        fim_mod = self._fim * dataset_size / (2 * jnp.pi * jnp.log(dataset_size))
+        one_plus_fmod = jnp.eye(len(self._fim)) + fim_mod
 
         # Take logarithm of the determinant
         det_log = jnp.linalg.slogdet(one_plus_fmod)[1] / 2
 
         # Compute effective dimension
-        numerator = logsumexp(det_log, axis=None) - jnp.log(len(fim))
+        numerator = logsumexp(det_log, axis=None) - jnp.log(len(self._fim))
         denominator = jnp.log(dataset_size / (2 * jnp.pi * jnp.log(dataset_size)))
         effective_dims = jnp.squeeze(2 * numerator / denominator)
-        effective_dims = effective_dims / self._estimator_params_num
+        effective_dims = effective_dims / self._estimator.params.total_params
 
         return float(effective_dims)
