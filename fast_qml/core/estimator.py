@@ -58,7 +58,7 @@ class EstimatorParameters:
         if self.c_weights is not None:
             self.total_params += sum(x.size for x in jax.tree_leaves(self.c_weights))
         if self.q_weights is not None:
-            self.total_params += len(jnp.squeeze(self.q_weights))
+            self.total_params += len(self.q_weights.ravel())
 
 
 class Estimator:
@@ -78,6 +78,7 @@ class Estimator:
     ):
         self.loss_fn = loss_fn
         self.optimizer_fn = optimizer_fn
+        self.estimator_type = estimator_type
         self._init_args = init_args
         self.input_shape = None
 
@@ -85,28 +86,21 @@ class Estimator:
         self.init_parameters()
 
         # Initiate estimator optimizer
-        self._trainer = self._init_trainer(estimator_type)
+        self._trainer = self._init_trainer()
 
-    @staticmethod
-    def _init_trainer(estimator_type: str):
-        """Initializes and returns an optimizer based on the specified estimator type.
-
-        Args:
-            estimator_type: The type of optimizer to initialize. Valid options are
-            'quantum', 'classical', and 'hybrid'.
-
-        Returns:
-            An instance of optimizer based on the estimator type.
+    def _init_trainer(self):
         """
-        if estimator_type == 'quantum':
+        Initializes and returns an optimizer based on the specified estimator type.
+        """
+        if self.estimator_type == 'quantum':
             return QuantumOptimizer
-        elif estimator_type == 'classical':
+        elif self.estimator_type == 'classical':
             return ClassicalOptimizer
-        elif estimator_type == 'hybrid':
+        elif self.estimator_type == 'hybrid':
             return HybridOptimizer
         else:
             raise ValueError(
-                f"Invalid optimizer type: {estimator_type},"
+                f"Invalid optimizer type: {self.estimator_type},"
                 f" available options are {'quantum', 'classical', 'hybrid'}"
             )
 
@@ -116,7 +110,7 @@ class Estimator:
         """
         # As JAX implements an explicit PRNG, we need to artificially change random seed, in order to
         # achiever pseudo sampling, allowing to get different numbers each time we sample parameters
-        self.random_seed += 1
+        # self.random_seed += 1
 
         # Initiate estimator parameters with sampled numbers
         self.params = EstimatorParameters(
