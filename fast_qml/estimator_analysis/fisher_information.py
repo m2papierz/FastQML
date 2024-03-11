@@ -67,9 +67,20 @@ class FisherInformation:
             c_weights=c_params, batch_stats=batch_stats,
             training=False, q_model_probs=True)
 
+        # Depending on estimator type compute jacobian over different parameters
+        estimator_type = self._estimator.estimator_type
+        if estimator_type == "quantum":
+            argnums = 1
+        elif estimator_type == "classical":
+            argnums = 2
+        else:
+            argnums = (1, 2)
+
         # Compute derivatives of probabilities in regard to model parameters
         proba_d = jax.jacfwd(
-            self._estimator.model)(x, q_params, c_params, batch_stats, False, True)
+            self._estimator.model,
+            argnums=argnums
+        )(x, q_params, c_params, batch_stats, False, True)
 
         return proba, proba_d
 
