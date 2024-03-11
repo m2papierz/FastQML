@@ -186,8 +186,20 @@ class QuantumEstimator(Estimator):
         else:
             aux_input = np.random.randn(self._n_qubits)
 
-        aux_input = np.array([aux_input])
-        print(qml.draw(self._quantum_circuit)(aux_input, self.params.q_weights))
+        @qml.qnode(device=self._device, interface="jax")
+        def draw_q_node(data, params):
+            self._quantum_circuit(data, params)
+            return [
+                qml.expval(self._measurement_op(i))
+                for i in range(self._measurements_num)
+            ]
+
+        # Print the circuit drawing
+        print(qml.draw(
+            qnode =draw_q_node,
+            expansion_strategy='device',
+            show_matrices=False)(np.array([aux_input]), self.params.q_weights)
+        )
 
 
 class VariationalQuantumEstimator(QuantumEstimator):
