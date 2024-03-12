@@ -131,10 +131,7 @@ class ClassicalEstimator(Estimator):
                 c_out = self._c_model.apply({'params': c_weights}, x_data)
                 output = jax.numpy.array(c_out)
 
-            if q_model_probs:
-                return output[0]
-            else:
-                return output
+            return output[0] if q_model_probs else output
 
         return _forward()
 
