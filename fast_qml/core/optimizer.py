@@ -56,7 +56,7 @@ class Optimizer:
         c_params: Parameters of the classical model.
         q_params: Parameters of the quantum model.
         batch_stats: Statistics for batch normalization layers if applicable.
-        model: Quantum node representing the quantum circuit.
+        forward_fn: Forward function of the estimator.
         loss_fn: Loss function used for core.
         c_optimizer: The optimizer for classical parameters. It should be compatible with the optax API.
         q_optimizer : The optimizer for quantum parameters. It should be compatible with the optax API.
@@ -69,7 +69,7 @@ class Optimizer:
             c_params: Union[Dict[str, Mapping[str, jnp.ndarray]], None],
             q_params: Union[jnp.ndarray, None],
             batch_stats: Union[Dict[str, Mapping[str, jnp.ndarray]], None],
-            model: [qml.qnode, Callable],
+            forward_fn: [qml.qnode, Callable],
             loss_fn: Callable,
             c_optimizer: Union[optax.GradientTransformation, None],
             q_optimizer: Union[optax.GradientTransformation, None],
@@ -80,7 +80,7 @@ class Optimizer:
         self._c_params = c_params
         self._q_params = q_params
         self._batch_stats = batch_stats
-        self._model = model
+        self._forward_fn = forward_fn
         self._loss_fn = loss_fn
         self._batch_size = batch_size
 
@@ -103,7 +103,7 @@ class Optimizer:
         """
         children = [self._c_params, self._q_params, self._batch_stats]
         aux_data = {
-            'model': self._model,
+            'model': self._forward_fn,
             'loss_fn': self._loss_fn,
             'c_optimizer': self._c_opt,
             'q_optimizer': self._q_opt,
@@ -248,7 +248,7 @@ class QuantumOptimizer(Optimizer):
         c_params: Parameters of the classical model.
         q_params: Parameters of the quantum model.
         batch_stats: Statistics for batch normalization layers if applicable.
-        model: Quantum node representing the quantum circuit.
+        forward_fn: Forward function of the estimator.
         loss_fn: Loss function used for core.
         c_optimizer: The optimizer for classical parameters. It should be compatible with the optax API.
         q_optimizer : The optimizer for quantum parameters. It should be compatible with the optax API.
@@ -261,7 +261,7 @@ class QuantumOptimizer(Optimizer):
             c_params: Union[Dict[str, Mapping[str, jnp.ndarray]], None],
             q_params: Union[jnp.ndarray, None],
             batch_stats: Union[jnp.ndarray, None],
-            model: [qml.qnode, Callable],
+            forward_fn: [qml.qnode, Callable],
             loss_fn: Callable,
             c_optimizer: Union[optax.GradientTransformation, None],
             q_optimizer: Union[optax.GradientTransformation, None],
@@ -273,7 +273,7 @@ class QuantumOptimizer(Optimizer):
             c_params=c_params,
             q_params=q_params,
             batch_stats=batch_stats,
-            model=model,
+            forward_fn=forward_fn,
             loss_fn=loss_fn,
             c_optimizer=c_optimizer,
             q_optimizer=q_optimizer,
@@ -299,7 +299,7 @@ class QuantumOptimizer(Optimizer):
         Returns:
             Computed loss value.
         """
-        predictions = self._model(q_weights=weights, x_data=x_data)
+        predictions = self._forward_fn(q_weights=weights, x_data=x_data)
         predictions = jnp.array(predictions).T
         loss_val = self._loss_fn(predictions, y_data).mean()
         return loss_val
@@ -479,7 +479,7 @@ class ClassicalOptimizer(Optimizer):
         c_params: Parameters of the classical model.
         q_params: Parameters of the quantum model.
         batch_stats: Statistics for batch normalization layers if applicable.
-        model: Quantum node representing the quantum circuit.
+        forward_fn: Forward function of the estimator.
         loss_fn: Loss function used for core.
         c_optimizer: The optimizer for classical parameters. It should be compatible with the optax API.
         q_optimizer : The optimizer for quantum parameters. It should be compatible with the optax API.
@@ -492,7 +492,7 @@ class ClassicalOptimizer(Optimizer):
             c_params: Union[jnp.ndarray, None],
             q_params: Union[jnp.ndarray, None],
             batch_stats: Union[jnp.ndarray, None],
-            model: [qml.qnode, Callable],
+            forward_fn: [qml.qnode, Callable],
             loss_fn: Callable,
             c_optimizer: Union[optax.GradientTransformation, None],
             q_optimizer: Union[optax.GradientTransformation, None],
@@ -504,7 +504,7 @@ class ClassicalOptimizer(Optimizer):
             c_params=c_params,
             q_params=q_params,
             batch_stats=batch_stats,
-            model=model,
+            forward_fn=forward_fn,
             loss_fn=loss_fn,
             c_optimizer=c_optimizer,
             q_optimizer=q_optimizer,
@@ -535,7 +535,7 @@ class ClassicalOptimizer(Optimizer):
         Returns:
             Computed loss value and batch statistics.
         """
-        outs = self._model(
+        outs = self._forward_fn(
             c_weights=weights, x_data=x_data,
             batch_stats=batch_stats, training=training)
 
@@ -737,7 +737,7 @@ class HybridOptimizer(Optimizer):
         c_params: Parameters of the classical model.
         q_params: Parameters of the quantum model.
         batch_stats: Statistics for batch normalization layers if applicable.
-        model: Quantum node representing the quantum circuit.
+        forward_fn: Forward function of the estimator.
         loss_fn: Loss function used for core.
         c_optimizer: The optimizer for classical parameters. It should be compatible with the optax API.
         q_optimizer : The optimizer for quantum parameters. It should be compatible with the optax API.
@@ -750,7 +750,7 @@ class HybridOptimizer(Optimizer):
             c_params: Union[jnp.ndarray, None],
             q_params: Union[jnp.ndarray, None],
             batch_stats: Union[jnp.ndarray, None],
-            model: [qml.qnode, Callable],
+            forward_fn: [qml.qnode, Callable],
             loss_fn: Callable,
             c_optimizer: Union[optax.GradientTransformation, None],
             q_optimizer: Union[optax.GradientTransformation, None],
@@ -762,7 +762,7 @@ class HybridOptimizer(Optimizer):
             c_params=c_params,
             q_params=q_params,
             batch_stats=batch_stats,
-            model=model,
+            forward_fn=forward_fn,
             loss_fn=loss_fn,
             c_optimizer=c_optimizer,
             q_optimizer=q_optimizer,
@@ -793,7 +793,7 @@ class HybridOptimizer(Optimizer):
         Returns:
             Computed loss value.
         """
-        outs = self._model(
+        outs = self._forward_fn(
             c_weights=c_weights,
             q_weights=q_weights,
             batch_stats=batch_stats,
