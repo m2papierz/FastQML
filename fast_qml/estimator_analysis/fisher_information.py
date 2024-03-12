@@ -14,6 +14,7 @@ An implementation of the Fisher Information Matrix (FIM).
 
 from functools import partial
 from dataclasses import asdict
+from typing import Dict, Any
 
 import jax
 from jax import vmap
@@ -30,19 +31,40 @@ class FisherInformation:
     Abbas et al., "The power of quantum neural networks."
     <https://arxiv.org/pdf/2011.00027.pdf>
     """
+
+    argnums = {
+        'quantum': 1, 'classical': 2, 'hybrid': (1, 2)
+    }
+
     def __init__(
             self,
             estimator: Estimator
     ):
         self._estimator = estimator
+        self._type = estimator.estimator_type
 
-    def _get_proba_and_grads_quantum(
+    @staticmethod
+    def _concat_classical_grads(
+            proba_d_dict: Dict[str, Any],
+            proba: jnp.ndarray
+    ) -> jnp.ndarray:
+        """
+        Ravel model kernels and concatenate into a single matrix.
+        """
+        return jnp.concatenate(
+            arrays=[
+                jnp.reshape(layer['kernel'], newshape=(len(proba), -1)).T
+                for layer in proba_d_dict.values()
+            ], axis=0
+        )
+
+    def _get_proba_and_grads(
             self,
             x: jnp.ndarray
     ):
         """
-        Computes for the quantum estimator the output probabilities and their gradients with
-        respect to the model parameters for a given input.
+        Computes the output probabilities and their gradients with respect to the estimator
+         parameters for a given input.
 
         Args:
             x: The input data for which the Fisher Information Matrix is to be computed.
@@ -54,61 +76,35 @@ class FisherInformation:
         """
         # Sample new set of model parameters and unpack them
         self._estimator.init_parameters()
-        _, q_params, _, _ = asdict(self._estimator.params).values()
+        c_params, q_params, _, _ = asdict(self._estimator.params).values()
 
-        # Compute model output logits
-        proba = self._estimator.forward(
-            x_data=x, q_weights=q_params, q_model_probs=True)
-
-        # Compute derivatives of probabilities in regard to model parameters
-        proba_d = jax.jacfwd(
-            self._estimator.forward,
-            argnums=1
-        )(x, q_params, None, None, False, True)
-
-        return proba, proba_d
-
-    def _get_proba_and_grads_classical(
-            self,
-            x: jnp.ndarray
-    ):
-        """
-        Computes for the classical estimator the output probabilities and their gradients with
-        respect to the model parameters for a given input.
-
-        Args:
-            x: The input data for which the Fisher Information Matrix is to be computed.
-
-        Returns:
-            A tuple containing two elements:
-            - jnp.ndarray representing the output probabilities of the model for the given input.
-            - jnp.ndarray representing the gradients of the output probabilities.
-        """
-        # Sample new set of model parameters and unpack them
-        self._estimator.init_parameters()
-        c_params, _, _, _ = asdict(self._estimator.params).values()
-
-        # Ensure that input dimension is correct
-        if len(x.shape) < len(self._estimator.input_shape):
-            x = jnp.expand_dims(x, axis=0)
+        # Ensure that input dimension is correct for the classical estimator component
+        if self._type in ['classical', 'hybrid']:
+            if len(x.shape) < len(self._estimator.input_shape):
+                x = jnp.expand_dims(x, axis=0)
 
         # Compute model output probabilities
         proba = self._estimator.forward(
-            x_data=x, c_weights=c_params, training=False, q_model_probs=True)
+            x_data=x, c_weights=c_params, q_weights=q_params,
+            training=False, q_model_probs=True
+        )
 
         # Compute derivatives of probabilities in regard to model parameters
-        proba_d_dict = jax.jacfwd(
-            self._estimator.forward,
-            argnums=2
-        )(x, None, c_params, None, False, True)
+        proba_d = jax.jacfwd(
+            self._estimator.forward, argnums=self.argnums[self._type]
+        )(x, q_params, c_params, None, False, True)
 
-        # Ravel model kernels and concatenate into single matrix
-        proba_d = jnp.concatenate(
-            [
-                jnp.reshape(layer['kernel'], newshape=(len(proba), -1)).T
-                for name, layer in proba_d_dict.items()
-            ], axis=0
-        )
+        # Ravel classical model kernels and concatenate into single matrix
+        if self._type == 'hybrid':
+            proba_d_q, proba_d_c = proba_d
+            proba_d_c = self._concat_classical_grads(proba_d_c, proba)
+            proba_d_q = jnp.reshape(proba_d_q, newshape=(len(proba), -1))
+
+            # Concatenate quantum and classical matrices into one
+            proba_d = jnp.concatenate(arrays=[proba_d_c.T, proba_d_q], axis=1)
+
+        elif self._type == 'classical':
+            proba_d = self._concat_classical_grads(proba_d, proba).T
 
         return proba, proba_d
 
@@ -127,12 +123,7 @@ class FisherInformation:
             `n_params` is the number of model outputs (observables).
         """
         # Compute probabilities and gradients
-        if self._estimator.estimator_type == 'quantum':
-            proba, proba_d = self._get_proba_and_grads_quantum(x=x)
-        elif self._estimator.estimator_type == 'classical':
-            proba, proba_d = self._get_proba_and_grads_classical(x=x)
-        else:
-            raise NotImplementedError("Hybrid model FIM is not yet implemented.")
+        proba, proba_d = self._get_proba_and_grads(x=x)
 
         # Exclude zero values and calculate 1 / proba
         non_zeros_proba = jnp.where(
