@@ -110,7 +110,7 @@ class HybridEstimator(Estimator):
                 'q_weights': q_weights
             }
 
-    def model(
+    def forward(
             self,
             x_data: jnp.ndarray,
             q_weights: Union[jnp.ndarray, None] = None,
@@ -133,14 +133,14 @@ class HybridEstimator(Estimator):
         Returns:
             Outputs of the estimator model.
         """
-        def _hybrid_model():
+        def _forward():
             if self._batch_norm:
                 if training:
                     c_out, updates = self._c_model.apply(
                         {'params': c_weights, 'batch_stats': batch_stats},
                         x_data, train=training, mutable=['batch_stats'])
                     c_out = c_out[0] if q_model_probs else c_out
-                    q_out = self._q_model.model(
+                    q_out = self._q_model.forward(
                         q_weights=q_weights,
                         x_data=jax.numpy.array(c_out),
                         q_model_probs=q_model_probs)
@@ -150,7 +150,7 @@ class HybridEstimator(Estimator):
                         {'params': c_weights, 'batch_stats': batch_stats},
                         x_data, train=training, mutable=False)
                     c_out = c_out[0] if q_model_probs else c_out
-                    q_out = self._q_model.model(
+                    q_out = self._q_model.forward(
                         q_weights=q_weights,
                         x_data=jax.numpy.array(c_out),
                         q_model_probs=q_model_probs)
@@ -158,13 +158,13 @@ class HybridEstimator(Estimator):
             else:
                 c_out = self._c_model.apply({'params': c_weights}, x_data)
                 c_out = c_out[0] if q_model_probs else c_out
-                q_out = self._q_model.model(
+                q_out = self._q_model.forward(
                     q_weights=q_weights,
                     x_data=jax.numpy.array(c_out),
                     q_model_probs=q_model_probs)
                 return jax.numpy.array(q_out)
 
-        return _hybrid_model()
+        return _forward()
 
 
 class HybridRegressor(HybridEstimator):
@@ -205,7 +205,7 @@ class HybridRegressor(HybridEstimator):
             x: An array of input data.
         """
         return jnp.array(
-            self.model(
+            self.forward(
                 c_weights=self.params.c_weights,
                 q_weights=self.params.q_weights,
                 batch_stats=self.params.batch_stats,
@@ -258,7 +258,7 @@ class HybridClassifier(HybridEstimator):
             a single probability for each sample. For multi-class classification, this will be a 2D array
             where each row corresponds to a sample and each column corresponds to a class.
         """
-        logits = self.model(
+        logits = self.forward(
                 c_weights=self.params.c_weights,
                 q_weights=self.params.q_weights,
                 batch_stats=self.params.batch_stats,

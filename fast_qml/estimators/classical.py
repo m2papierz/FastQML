@@ -92,7 +92,7 @@ class ClassicalEstimator(Estimator):
             weights = variables['params']
             return {'c_weights': weights}
 
-    def model(
+    def forward(
             self,
             x_data: jnp.ndarray,
             q_weights: Union[jnp.ndarray, None] = None,
@@ -115,7 +115,7 @@ class ClassicalEstimator(Estimator):
         Returns:
             Outputs of the estimator model.
         """
-        def _classical_model():
+        def _forward():
             if self.batch_norm:
                 if training:
                     c_out, updates = self._c_model.apply(
@@ -136,7 +136,7 @@ class ClassicalEstimator(Estimator):
             else:
                 return output
 
-        return _classical_model()
+        return _forward()
 
 
 class ClassicalRegressor(ClassicalEstimator):
@@ -178,7 +178,7 @@ class ClassicalRegressor(ClassicalEstimator):
             x: An array of input data.
         """
         return jnp.array(
-            self.model(
+            self.forward(
                 c_weights=self.params.c_weights,
                 batch_stats=self.params.batch_stats,
                 x_data=x, training=False)
@@ -233,7 +233,7 @@ class ClassicalClassifier(ClassicalEstimator):
             a single probability for each sample. For multi-class classification, this will be a 2D array
             where each row corresponds to a sample and each column corresponds to a class.
         """
-        logits = self.model(
+        logits = self.forward(
             c_weights=self.params.c_weights,
             batch_stats=self.params.batch_stats,
             x_data=x, training=False

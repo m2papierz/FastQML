@@ -62,7 +62,7 @@ class FisherInformation:
                 x = jnp.expand_dims(x, axis=0)
 
         # Compute model output probabilities
-        proba = self._estimator.model(
+        proba = self._estimator.forward(
             x_data=x, q_weights=q_params,
             c_weights=c_params, batch_stats=batch_stats,
             training=False, q_model_probs=True)
@@ -78,7 +78,7 @@ class FisherInformation:
 
         # Compute derivatives of probabilities in regard to model parameters
         proba_d = jax.jacfwd(
-            self._estimator.model,
+            self._estimator.forward,
             argnums=argnums
         )(x, q_params, c_params, batch_stats, False, True)
 

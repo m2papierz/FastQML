@@ -138,7 +138,7 @@ class QuantumEstimator(Estimator):
         """
         raise NotImplementedError("Subclasses must implement this method.")
 
-    def model(
+    def forward(
             self,
             x_data: jnp.ndarray,
             q_weights: Union[jnp.ndarray, None] = None,
@@ -163,7 +163,7 @@ class QuantumEstimator(Estimator):
         """
         @jax.jit
         @qml.qnode(device=self._device, interface="jax")
-        def _circuit():
+        def _forward():
             self._quantum_circuit(
                 x_data=x_data, q_weights=q_weights)
 
@@ -174,7 +174,7 @@ class QuantumEstimator(Estimator):
                 ]
             else:
                 return qml.probs(wires=range(self._n_qubits))
-        return _circuit()
+        return _forward()
 
     def draw_circuit(self) -> None:
         """
@@ -294,7 +294,7 @@ class VQRegressor(VariationalQuantumEstimator):
             x: An array of input data.
         """
         return jnp.array(
-            self.model(q_weights=self.params.q_weights, x_data=x)
+            self.forward(q_weights=self.params.q_weights, x_data=x)
         ).ravel()
 
 
@@ -351,7 +351,7 @@ class VQClassifier(VariationalQuantumEstimator):
             a single probability for each sample. For multi-class classification, this will be a 2D array
             where each row corresponds to a sample and each column corresponds to a class.
         """
-        logits = self.model(q_weights=self.params.q_weights, x_data=x)
+        logits = self.forward(q_weights=self.params.q_weights, x_data=x)
 
         if self.classes_num == 2:
             return jnp.array(logits.ravel())
@@ -500,7 +500,7 @@ class QNNRegressor(QNN):
             x: An array of input data.
         """
         return jnp.array(
-            self.model(q_weights=self.params.q_weights, x_data=x)
+            self.forward(q_weights=self.params.q_weights, x_data=x)
         ).ravel()
 
 
@@ -562,7 +562,7 @@ class QNNClassifier(QNN):
             a single probability for each sample. For multi-class classification, this will be a 2D array
             where each row corresponds to a sample and each column corresponds to a class.
         """
-        logits = self.model(q_weights=self.params.q_weights, x_data=x)
+        logits = self.forward(q_weights=self.params.q_weights, x_data=x)
 
         if self.classes_num == 2:
             return jnp.array(logits.ravel())

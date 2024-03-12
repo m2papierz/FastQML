@@ -125,7 +125,7 @@ class Estimator:
         raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
-    def model(
+    def forward(
             self,
             x_data: jnp.ndarray,
             q_weights: Union[jnp.ndarray, None] = None,
@@ -172,7 +172,7 @@ class Estimator:
             c_params=self.params.c_weights,
             q_params=self.params.q_weights,
             batch_stats=self.params.batch_stats,
-            model=self.model,
+            model=self.forward,
             loss_fn=self.loss_fn,
             c_optimizer=self.optimizer_fn(learning_rate),
             q_optimizer=self.optimizer_fn(learning_rate),
