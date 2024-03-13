@@ -86,7 +86,7 @@ class FisherInformation:
         """
         # Sample new set of model parameters and unpack them
         self._estimator.init_parameters()
-        c_params, q_params, _, _ = asdict(self._estimator.params).values()
+        q_params, c_params, _, _ = asdict(self._estimator.params).values()
 
         # Ensure that input dimension is correct for the classical estimator component
         if self._type in ['classical', 'hybrid']:
