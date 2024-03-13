@@ -83,6 +83,7 @@ class Estimator:
         self.input_shape = None
 
         # Initiate parameters
+        self.params = EstimatorParameters()
         self.init_parameters()
 
         # Initiate estimator optimizer
@@ -108,8 +109,8 @@ class Estimator:
         """
         Initiates estimator model parameters.
         """
-        # As JAX implements an explicit PRNG, we need to artificially change random seed, in order to
-        # achiever pseudo sampling, allowing to get different numbers each time we sample parameters
+        # To ensure varied outcomes in pseudo-random sampling with JAX's explicit PRNG system,
+        # we need to manually increment the random seed for each sampling
         self.random_seed += 1
 
         # Initiate estimator parameters with sampled numbers
