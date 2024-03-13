@@ -38,27 +38,27 @@ class EstimatorParameters:
     A dataclass to hold parameters for an estimator.
 
     Attributes:
-        c_weights: classical model weights
         q_weights: quantum weights
+        c_weights: classical model weights
         batch_stats: batch statistics for classical model
     """
-    c_weights: Union[jnp.ndarray, Dict[str, Any]] = None
     q_weights: jnp.ndarray = None
+    c_weights: Union[jnp.ndarray, Dict[str, Any]] = None
     batch_stats: Union[jnp.ndarray, Dict[str, Any]] = None
     total_params: int = 0
 
     def __post_init__(self):
-        if self.c_weights is not None and not isinstance(self.c_weights, (jnp.ndarray, dict)):
-            raise TypeError("c_weights must be either jnp.ndarray or dict")
         if self.q_weights is not None and not isinstance(self.q_weights, jnp.ndarray):
             raise TypeError("q_weights must be jnp.ndarray")
+        if self.c_weights is not None and not isinstance(self.c_weights, (jnp.ndarray, dict)):
+            raise TypeError("c_weights must be either jnp.ndarray or dict")
         if self.batch_stats is not None and not isinstance(self.batch_stats, (jnp.ndarray, dict)):
             raise TypeError("batch_stats must be either jnp.ndarray or dict")
 
-        if self.c_weights is not None:
-            self.total_params += sum(x.size for x in jax.tree_leaves(self.c_weights))
         if self.q_weights is not None:
             self.total_params += len(self.q_weights.ravel())
+        if self.c_weights is not None:
+            self.total_params += sum(x.size for x in jax.tree_leaves(self.c_weights))
 
 
 class Estimator:
