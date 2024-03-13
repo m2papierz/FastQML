@@ -16,6 +16,9 @@ from functools import partial
 from dataclasses import asdict
 from typing import Dict, Any
 
+import seaborn as sns
+import matplotlib.pyplot as plt
+
 import jax
 from jax import vmap
 import jax.numpy as jnp
@@ -38,10 +41,16 @@ class FisherInformation:
 
     def __init__(
             self,
-            estimator: Estimator
+            estimator: Estimator,
+            data: jnp.ndarray
     ):
         self._estimator = estimator
         self._type = estimator.estimator_type
+        self._fim = self._compute_fim(data)
+
+    @property
+    def fim(self):
+        return self._fim
 
     @staticmethod
     def _concat_classical_grads(
@@ -58,6 +67,7 @@ class FisherInformation:
             ], axis=0
         )
 
+    @partial(jax.jit, static_argnums=0)
     def _get_proba_and_grads(
             self,
             x: jnp.ndarray
@@ -108,6 +118,7 @@ class FisherInformation:
 
         return proba, proba_d
 
+    @partial(jax.jit, static_argnums=0)
     def _compute_fisher_matrix(
             self,
             x: jnp.ndarray
@@ -139,15 +150,15 @@ class FisherInformation:
         return (proba_d.T * one_over_proba) @ proba_d
 
     @partial(jax.jit, static_argnums=0)
-    def fisher_information(
+    def _compute_fim(
             self,
-            x_data: jnp.ndarray
+            data: jnp.ndarray
     ) -> jnp.ndarray:
         """
         Computes the normalized Fisher Information Matrix (FIM) averaged over a batch of data.
 
         Args:
-            x_data: The input data, a batch of observations for which the Fisher Information Matrix is
+            data: The input data, a batch of observations for which the Fisher Information Matrix is
             to be computed.
 
         Returns:
@@ -158,9 +169,30 @@ class FisherInformation:
             self._compute_fisher_matrix, in_axes=0)
 
         # Compute FIM average over the given data
-        fim = jnp.nanmean(_compute_fisher_matrix_batched(x_data), axis=0)
+        fim = _compute_fisher_matrix_batched(x=data)
 
         # Normalize FIM
+        fim = jnp.nanmean(fim, axis=0)
         fisher_inf_norm = fim * len(fim) / jnp.trace(fim)
 
         return fisher_inf_norm
+
+    def plot_matrix(self) -> None:
+        """
+        Plots the Fisher Information Matrix (FIM) using a heatmap visualization.
+        """
+        sns.heatmap(self._fim, cmap="Greens", linewidths=0.8)
+        plt.show()
+
+    def plot_spectrum(self) -> None:
+        """
+        Plots a histogram of the eigenvalues of the Fisher Information Matrix (FIM). This
+        method calculates the eigenvalues of the FIM and displays their distribution as a
+        histogram, providing insight into the spectrum of the FIM.
+        """
+        eigenvalues = jnp.linalg.eigvalsh(self._fim)
+        sns.histplot(eigenvalues, bins=len(eigenvalues), kde=False, alpha=0.85)
+        plt.title("Histogram of the FIM eigenvalues")
+        plt.xlabel("Eigenvalue")
+        plt.ylabel("Frequency")
+        plt.show()
