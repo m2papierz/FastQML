@@ -223,7 +223,7 @@ class Ansatz(VariationalForm):
 
     def apply(
             self,
-            params: jnp.ndarray
+            params: Union[jnp.ndarray, None] = None
     ) -> None:
         """
         Applies the variational ansatz to the quantum circuit.
@@ -231,6 +231,9 @@ class Ansatz(VariationalForm):
         Args:
             params: Array of parameters for the entire variational form.
         """
+        if params is None:
+            params = jnp.zeros(self._get_params_num())
+
         if len(params) != self.params_num:
             ValueError(
                 f"Invalid parameters shape. "
@@ -252,7 +255,6 @@ class Ansatz(VariationalForm):
                             (self._reps + 1) * block_params_n
                         ]
             self._apply_rotation_layer(params=last_params_subset)
-
 
 class TwoLocal(VariationalForm):
     """
@@ -356,7 +358,7 @@ class TwoLocal(VariationalForm):
 
     def apply(
             self,
-            params: jnp.ndarray
+            params: Union[jnp.ndarray] = None
     ) -> None:
         """
         Applies the variational ansatz to the quantum circuit.
@@ -364,6 +366,9 @@ class TwoLocal(VariationalForm):
         Args:
             params: Array of parameters for the entire variational form.
         """
+        if params is None:
+            params = jnp.zeros(self._get_params_num())
+
         if len(params) != self.params_num:
             ValueError(
                 f"Invalid parameters shape. "
@@ -532,7 +537,7 @@ class TreeTensor(VariationalForm):
 
     def apply(
             self,
-            params: jnp.ndarray
+            params: Union[jnp.ndarray] = None
     ) -> None:
         """
         Applies the variational ansatz to the quantum circuit.
@@ -540,6 +545,9 @@ class TreeTensor(VariationalForm):
         Args:
             params: Array of parameters for the entire variational form.
         """
+        if params is None:
+            params = jnp.zeros(self._get_params_num())
+
         if len(params) != self.params_num:
             ValueError(
                 f"Invalid parameters shape. "
@@ -665,7 +673,7 @@ class StronglyEntanglingLayers(VariationalForm):
 
     def apply(
             self,
-            params: jnp.ndarray
+            params: Union[jnp.ndarray] = None
     ) -> None:
         """
         Applies the variational ansatz to the quantum circuit.
@@ -673,4 +681,7 @@ class StronglyEntanglingLayers(VariationalForm):
         Args:
             params: Array of parameters for the entire variational form.
         """
+        if params is None:
+            params = jnp.zeros(self._get_params_num())
+
         self._variational_func(params=params)
