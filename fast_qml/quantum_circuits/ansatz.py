@@ -120,7 +120,7 @@ class Ansatz(VariationalForm):
 
     # Import necessary libraries
     >>> import numpy as np
-    >>> from fast_qml.quantum_circuits.variational_forms import Ansatz
+    >>> from fast_qml.quantum_circuits.ansatz import Ansatz
 
     # Define a user-specific variational function
     >>> def my_variational_function(params):
@@ -274,7 +274,7 @@ class TwoLocal(VariationalForm):
 
     # Import necessary libraries
     >>> import numpy as np
-    >>> from fast_qml.quantum_circuits.variational_forms import TwoLocal
+    >>> from fast_qml.quantum_circuits.ansatz import TwoLocal
 
     # Create an instance of the TwoLocal class
     >>> two_local = TwoLocal(
@@ -410,7 +410,7 @@ class EfficientSU2(TwoLocal):
 
     # Import necessary libraries
     >>> import numpy as np
-    >>> from fast_qml.quantum_circuits.variational_forms import EfficientSU2
+    >>> from fast_qml.quantum_circuits.ansatz import EfficientSU2
 
     # Create an instance of the EfficientSU2 class
     >>> su2 = EfficientSU2(
@@ -466,7 +466,7 @@ class TreeTensor(VariationalForm):
 
     # Import necessary libraries
     >>> import numpy as np
-    >>> from fast_qml.quantum_circuits.variational_forms import TreeTensor
+    >>> from fast_qml.quantum_circuits.ansatz import TreeTensor
 
     # Create an instance of the TreeTensor class
     >>> tree_tensor = TreeTensor(
@@ -575,7 +575,7 @@ class StronglyEntanglingLayers(VariationalForm):
 
     # Import necessary libraries
     >>> import numpy as np
-    >>> from fast_qml.quantum_circuits.variational_forms import StronglyEntanglingLayers
+    >>> from fast_qml.quantum_circuits.ansatz import StronglyEntanglingLayers
 
     # Create an instance of the StronglyEntanglingLayers class
     >>> strong_ent = TreeTensor(
