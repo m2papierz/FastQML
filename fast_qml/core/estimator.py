@@ -18,13 +18,18 @@ from typing import Union
 from typing import Dict
 from typing import Mapping
 from typing import Any
+from typing import List
 
 import jax
 import torch
 import pickle
 import numpy as np
+import pennylane as qml
 from jax import numpy as jnp
 from torch.utils.data import DataLoader
+
+from fast_qml.quantum_circuits.data_encoding import FeatureMap
+from fast_qml.quantum_circuits.ansatz import VariationalForm
 
 from fast_qml.core.callbacks import EarlyStopping
 from fast_qml.core.optimizer import QuantumOptimizer
@@ -33,13 +38,13 @@ from fast_qml.core.optimizer import HybridOptimizer
 
 
 @dataclasses.dataclass
-class EstimatorParameters:
+class EstimatorLayerParameters:
     """
-    A dataclass to hold parameters for an estimator.
+    A dataclass to hold parameters for an estimator layer.
 
     Attributes:
         q_weights: quantum weights
-        c_weights: classical model weights
+        c_weights: classical weights
         batch_stats: batch statistics for classical model
     """
     q_weights: jnp.ndarray = None
@@ -59,6 +64,172 @@ class EstimatorParameters:
             self.total_params += len(self.q_weights.ravel())
         if self.c_weights is not None:
             self.total_params += sum(x.size for x in jax.tree_leaves(self.c_weights))
+
+
+class EstimatorLayer:
+    def __init__(
+            self,
+            init_args: Dict[str, Any]
+    ):
+        self._random_seed = 0
+
+        self._init_args = init_args
+        self.params = EstimatorLayerParameters()
+
+    def init_parameters(self):
+        """
+        Initiates estimator layer parameters.
+        """
+        # To ensure varied outcomes in pseudo-random sampling with JAX's explicit PRNG system,
+        # we need to manually increment the random seed for each sampling
+        self._random_seed += 1
+
+        # Initiate layer parameters with sampled parameters
+        self.params = EstimatorLayerParameters(
+            **self._sample_parameters(**self._init_args)
+        )
+
+    @abstractmethod
+    def _sample_parameters(self, **kwargs):
+        """
+        Abstract method for sampling estimator layer parameters.
+        """
+        raise NotImplementedError("Subclasses must implement this method.")
+
+
+class QuantumLayer(EstimatorLayer):
+    def __init__(
+            self,
+            n_qubits: int,
+            ansatz: VariationalForm,
+            feature_map: Union[FeatureMap, None] = None,
+            layers_num: Union[int, None] = None,
+            measurement_op: Callable = qml.PauliZ,
+            measurements_num: int = 1,
+            data_reuploading: bool = False
+    ):
+        super().__init__(
+            init_args={
+                'n_ansatz_params': ansatz.params_num,
+                'layers_n': layers_num
+            }
+        )
+
+        # Validate measurement operation
+        if not self._is_valid_measurement_op(measurement_op):
+            raise ValueError(
+                "Invalid measurement operation provided."
+            )
+
+        if feature_map is None and data_reuploading is True:
+            raise ValueError(
+                "Data reuploading cannot be applied with no feature_map provided."
+            )
+
+        self._n_qubits = n_qubits
+        self._ansatz = ansatz
+        self._feature_map = feature_map
+        self._layers_num = layers_num
+        self._measurement_op = measurement_op
+        self._measurements_num = measurements_num
+        self._data_reuploading = data_reuploading
+
+        self._device = qml.device(
+            name="default.qubit.jax", wires=self._n_qubits)
+
+    def _sample_parameters(
+            self,
+            n_ansatz_params: Union[int, List[int]],
+            layers_n: int = None
+    ) -> Dict[str, jnp.ndarray]:
+        """
+        Samples randomly quantum layer parameters.
+
+        Args:
+            n_ansatz_params: The number of parameters of the ansatz.
+            layers_n: Number of layers in the quantum circuit.
+
+        Returns:
+            Dictionary with sampled parameters.
+        """
+        key = jax.random.PRNGKey(self._random_seed)
+
+        if isinstance(n_ansatz_params, int):
+            shape = (layers_n, n_ansatz_params) if layers_n else [n_ansatz_params]
+        else:
+            shape = (layers_n, *n_ansatz_params) if layers_n else [*n_ansatz_params]
+
+        weights = 0.1 * jax.random.normal(key, shape=shape)
+        return {'q_weights': weights}
+
+    def quantum_circuit(
+            self,
+            x_data: Union[jnp.ndarray, None] = None,
+            q_weights: Union[jnp.ndarray, None] = None
+    ) -> None:
+        """
+        Applies the quantum circuit.
+
+        This method is conditional on the data reuploading flag. If data reuploading is enabled,
+        the feature map is applied at every layer.
+
+        Args:
+            x_data: Input data to be encoded into the quantum state.
+            q_weights: Parameters for the variational form.
+        """
+        if not self._data_reuploading:
+            self._feature_map.apply(features=x_data)
+            for i in range(self._layers_num):
+                self._ansatz.apply(params=q_weights[i])
+        else:
+            if self._feature_map is not None and x_data is None:
+                raise ValueError(
+                    "The input array x_data must be provided for the feature map."
+                )
+
+            for i in range(self._layers_num):
+                if self._feature_map is not None:
+                    self._feature_map.apply(features=x_data)
+                self._ansatz.apply(params=q_weights[i])
+
+    @staticmethod
+    def _is_valid_measurement_op(measurement_op):
+        """
+        Check if the provided measurement operation is valid.
+        """
+        return isinstance(measurement_op(0), qml.operation.Operation)
+
+    def forward(
+            self,
+            x_data: jnp.ndarray,
+            q_weights: Union[jnp.ndarray, None] = None,
+            return_probs: Union[bool] = False
+    ):
+        """
+        Forward method of the quantum layer returning quantum node outputs.
+
+        Args:
+            x_data: Input data array.
+            q_weights: Weights of the quantum model.
+            return_probs:Indicates whether the quantum model shall return probabilities.
+
+        Returns:
+            Outputs of the quantum node.
+        """
+        @jax.jit
+        @qml.qnode(device=self._device, interface="jax")
+        def _q_node():
+            self.quantum_circuit(
+                x_data=x_data, q_weights=q_weights)
+
+            if not return_probs:
+                return [
+                    qml.expval(self._measurement_op(i))
+                    for i in range(self._measurements_num)
+                ]
+            else:
+                return qml.probs(wires=range(self._n_qubits))
+        return _q_node()
 
 
 class Estimator:
