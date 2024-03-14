@@ -19,10 +19,12 @@ from typing import Dict
 from typing import Mapping
 from typing import Any
 from typing import List
+from typing import Tuple
 
 import jax
 import torch
 import pickle
+import flax.linen as nn
 import numpy as np
 import pennylane as qml
 from jax import numpy as jnp
@@ -96,6 +98,13 @@ class EstimatorLayer:
         """
         raise NotImplementedError("Subclasses must implement this method.")
 
+    @abstractmethod
+    def forward(self, **kwargs):
+        """
+        Abstract method for defining estimator model.
+        """
+        raise NotImplementedError("Subclasses must implement this method.")
+
 
 class QuantumLayer(EstimatorLayer):
     def __init__(
@@ -162,6 +171,13 @@ class QuantumLayer(EstimatorLayer):
         weights = 0.1 * jax.random.normal(key, shape=shape)
         return {'q_weights': weights}
 
+    @staticmethod
+    def _is_valid_measurement_op(measurement_op):
+        """
+        Check if the provided measurement operation is valid.
+        """
+        return isinstance(measurement_op(0), qml.operation.Operation)
+
     def quantum_circuit(
             self,
             x_data: Union[jnp.ndarray, None] = None,
@@ -191,13 +207,6 @@ class QuantumLayer(EstimatorLayer):
                 if self._feature_map is not None:
                     self._feature_map.apply(features=x_data)
                 self._ansatz.apply(params=q_weights[i])
-
-    @staticmethod
-    def _is_valid_measurement_op(measurement_op):
-        """
-        Check if the provided measurement operation is valid.
-        """
-        return isinstance(measurement_op(0), qml.operation.Operation)
 
     def forward(
             self,
@@ -230,6 +239,98 @@ class QuantumLayer(EstimatorLayer):
             else:
                 return qml.probs(wires=range(self._n_qubits))
         return _q_node()
+
+
+class ClassicalLayer(EstimatorLayer):
+    def __init__(
+            self,
+            input_shape: Union[int, Tuple[int]],
+            c_module: nn.Module,
+            batch_norm: bool = False
+    ):
+        super().__init__(
+            init_args={
+                'c_module': c_module,
+                'input_shape': input_shape,
+                'batch_norm': batch_norm
+            }
+        )
+        self._c_module = c_module
+        self._batch_norm = batch_norm
+
+    def _sample_parameters(
+            self,
+            c_model: nn.Module,
+            input_shape: Union[int, Tuple[int], None] = None,
+            batch_norm: Union[bool, None] = None
+    ):
+        """
+        Samples randomly classical layer parameters.
+
+        Args:
+            c_model: The classical model component.
+            input_shape: The shape of the input data for the classical component of the hybrid model.
+            batch_norm: Boolean indicating whether classical model uses batch normalization.
+
+        Returns:
+            Dictionary with sampled parameters.
+        """
+        inp_rng, init_rng = jax.random.split(
+            jax.random.PRNGKey(seed=self._random_seed), num=2)
+
+        if isinstance(input_shape, int):
+            self.input_shape = (1, input_shape)
+        else:
+            self.input_shape = (1, *input_shape)
+
+        c_inp = jax.random.normal(inp_rng, shape=self.input_shape)
+
+        if batch_norm:
+            variables = c_model.init(init_rng, c_inp, train=False)
+            weights, batch_stats = variables['params'], variables['batch_stats']
+            return {'c_weights': weights, 'batch_stats': batch_stats}
+        else:
+            variables = c_model.init(init_rng, c_inp)
+            weights = variables['params']
+            return {'c_weights': weights}
+
+    def forward(
+            self,
+            x_data: jnp.ndarray,
+            c_weights: Union[Dict[str, Mapping[str, jnp.ndarray]], None],
+            batch_stats: Union[Dict[str, Mapping[str, jnp.ndarray]], None],
+            training: Union[bool, None] = None,
+            flatten_output: Union[bool] = False
+    ) -> jnp.ndarray:
+        """
+        Forward method of the classical layer returning classical model outputs.
+
+        Args:
+            x_data: Input data.
+            c_weights: Weights of the classical model.
+            batch_stats: Batch normalization statistics for the classical model.
+            training: Indicates whether the model is being used for training or inference.
+            flatten_output: Indicates whether to flatten the output.
+
+        Returns:
+            Outputs of the classical model.
+        """
+        if self._batch_norm:
+            if training:
+                c_out, updates = self._c_module.apply(
+                    {'params': c_weights, 'batch_stats': batch_stats},
+                    x_data, train=training, mutable=['batch_stats'])
+                output = jax.numpy.array(c_out), updates['batch_stats']
+            else:
+                c_out = self._c_module.apply(
+                    {'params': c_weights, 'batch_stats': batch_stats},
+                    x_data, train=training, mutable=False)
+                output = jax.numpy.array(c_out)
+        else:
+            c_out = self._c_module.apply({'params': c_weights}, x_data)
+            output = jax.numpy.array(c_out)
+
+        return output[0] if flatten_output else output
 
 
 class Estimator:
