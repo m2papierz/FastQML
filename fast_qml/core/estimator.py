@@ -9,9 +9,9 @@
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
 import os
-import dataclasses
 from abc import abstractmethod
 from pathlib import Path
+import dataclasses
 
 from typing import Callable
 from typing import Union
@@ -67,16 +67,17 @@ class EstimatorLayerParameters:
         if self.c_weights is not None:
             self.total_params += sum(x.size for x in jax.tree_leaves(self.c_weights))
 
-
 class EstimatorLayer:
     def __init__(
             self,
             init_args: Dict[str, Any]
     ):
         self._random_seed = 0
-
         self._init_args = init_args
+
+        # Initiate layer parameters
         self.params = EstimatorLayerParameters()
+        self.init_parameters()
 
     def init_parameters(self):
         """
@@ -99,9 +100,16 @@ class EstimatorLayer:
         raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
-    def forward(self, **kwargs):
+    def forward_pass(self, **kwargs):
         """
-        Abstract method for defining estimator model.
+        Abstract method for defining layer forward pass.
+        """
+        raise NotImplementedError("Subclasses must implement this method.")
+
+    @abstractmethod
+    def backward_pass(self, **kwargs):
+        """
+        Abstract method for defining layer backward pass.
         """
         raise NotImplementedError("Subclasses must implement this method.")
 
@@ -208,10 +216,9 @@ class QuantumLayer(EstimatorLayer):
                     self._feature_map.apply(features=x_data)
                 self._ansatz.apply(params=q_weights[i])
 
-    def forward(
+    def forward_pass(
             self,
             x_data: jnp.ndarray,
-            q_weights: Union[jnp.ndarray, None] = None,
             return_probs: Union[bool] = False
     ):
         """
@@ -219,7 +226,6 @@ class QuantumLayer(EstimatorLayer):
 
         Args:
             x_data: Input data array.
-            q_weights: Weights of the quantum model.
             return_probs:Indicates whether the quantum model shall return probabilities.
 
         Returns:
@@ -229,7 +235,7 @@ class QuantumLayer(EstimatorLayer):
         @qml.qnode(device=self._device, interface="jax")
         def _q_node():
             self.quantum_circuit(
-                x_data=x_data, q_weights=q_weights)
+                x_data=x_data, q_weights=self.params.q_weights)
 
             if not return_probs:
                 return [
@@ -238,8 +244,22 @@ class QuantumLayer(EstimatorLayer):
                 ]
             else:
                 return qml.probs(wires=range(self._n_qubits))
-        return _q_node()
+        return jnp.array(_q_node())
 
+    def backward_pass(
+            self,
+            x_data,
+            y_data,
+            loss_fn):
+        def _calculate_loss(x, y):
+            predictions = self.forward_pass(x_data=x)
+            predictions = jnp.array(predictions).T
+            loss_val = loss_fn(predictions, y).mean()
+            return loss_val
+
+        loss, grads = jax.value_and_grad(_calculate_loss)(x_data, y_data)
+
+        return loss, grads
 
 class ClassicalLayer(EstimatorLayer):
     def __init__(
@@ -294,11 +314,9 @@ class ClassicalLayer(EstimatorLayer):
             weights = variables['params']
             return {'c_weights': weights}
 
-    def forward(
+    def forward_pass(
             self,
             x_data: jnp.ndarray,
-            c_weights: Union[Dict[str, Mapping[str, jnp.ndarray]], None],
-            batch_stats: Union[Dict[str, Mapping[str, jnp.ndarray]], None],
             training: Union[bool, None] = None,
             flatten_output: Union[bool] = False
     ) -> jnp.ndarray:
@@ -307,8 +325,6 @@ class ClassicalLayer(EstimatorLayer):
 
         Args:
             x_data: Input data.
-            c_weights: Weights of the classical model.
-            batch_stats: Batch normalization statistics for the classical model.
             training: Indicates whether the model is being used for training or inference.
             flatten_output: Indicates whether to flatten the output.
 
@@ -318,19 +334,49 @@ class ClassicalLayer(EstimatorLayer):
         if self._batch_norm:
             if training:
                 c_out, updates = self._c_module.apply(
-                    {'params': c_weights, 'batch_stats': batch_stats},
+                    {
+                        'params': self.params.c_weights,
+                        'batch_stats': self.params.batch_stats
+                    },
                     x_data, train=training, mutable=['batch_stats'])
                 output = jax.numpy.array(c_out), updates['batch_stats']
             else:
                 c_out = self._c_module.apply(
-                    {'params': c_weights, 'batch_stats': batch_stats},
+                    {
+                        'params': self.params.c_weights,
+                        'batch_stats': self.params.batch_stats
+                    },
                     x_data, train=training, mutable=False)
-                output = jax.numpy.array(c_out)
+                output = jax.numpy.array(c_out), None
         else:
-            c_out = self._c_module.apply({'params': c_weights}, x_data)
-            output = jax.numpy.array(c_out)
+            c_out = self._c_module.apply(
+                {'params': self.params.c_weights}, x_data)
+            output = jax.numpy.array(c_out), None
 
         return output[0] if flatten_output else output
+
+    def backward_pass(
+            self,
+            x_data,
+            y_data,
+            loss_fn
+    ):
+        def _calculate_loss(x, y):
+            outs = self.forward_pass(
+                x_data=x, training=True, flatten_output=False)
+
+            if self.params.batch_stats:
+                predictions, self.params.batch_stats = outs
+            else:
+                predictions = outs
+
+            loss_val = loss_fn(predictions, y).mean()
+            return loss_val, self.params.batch_stats
+
+        (loss, batch_stats), grads = jax.value_and_grad(
+            _calculate_loss, has_aux=True)(x_data, y_data)
+
+        return loss, grads
 
 
 class Estimator:
@@ -355,7 +401,7 @@ class Estimator:
         self.input_shape = None
 
         # Initiate parameters
-        self.params = EstimatorParameters()
+        self.params = EstimatorLayerParameters()
         self.init_parameters()
 
         # Initiate estimator optimizer
@@ -381,8 +427,8 @@ class Estimator:
         """
         Initiates estimator model parameters.
         """
-        # To ensure varied outcomes in pseudo-random sampling with JAX's explicit PRNG system,
-        # we need to manually increment the random seed for each sampling
+        # As JAX implements an explicit PRNG, we need to artificially change random seed, in order to
+        # achiever pseudo sampling, allowing to get different numbers each time we sample parameters
         self.random_seed += 1
 
         # Initiate estimator parameters with sampled numbers
