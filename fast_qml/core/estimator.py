@@ -11,7 +11,11 @@
 import os
 from abc import abstractmethod
 from pathlib import Path
+from collections import OrderedDict
+
 import dataclasses
+from dataclasses import asdict
+from dataclasses import field
 
 from typing import Callable
 from typing import Union
@@ -66,6 +70,29 @@ class EstimatorLayerParameters:
             self.total_params += len(self.q_weights.ravel())
         if self.c_weights is not None:
             self.total_params += sum(x.size for x in jax.tree_leaves(self.c_weights))
+
+
+@dataclasses.dataclass
+class EstimatorParameters:
+    layers_params: List[EstimatorLayerParameters]
+    parameters: OrderedDict[str, Any] = field(default_factory=OrderedDict)
+
+    def __post_init__(self):
+        q_counts, c_counts = 0, 0
+        for layer_params in self.layers_params:
+            q_params, c_params, batch_stats, _ = asdict(layer_params).values()
+
+            if q_params is not None:
+                self.parameters[f"QuantumLayer{q_counts}"] = q_params
+                q_counts += 1
+
+            if c_params is not None:
+                if batch_stats is not None:
+                    self.parameters[f"ClassicalLayer{c_counts}"] = [c_params, batch_stats]
+                else:
+                    self.parameters[f"ClassicalLayer{c_counts}"] = c_params
+                c_counts += 1
+
 
 class EstimatorLayer:
     def __init__(
