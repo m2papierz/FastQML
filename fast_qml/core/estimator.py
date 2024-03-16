@@ -13,8 +13,8 @@ from abc import abstractmethod
 from pathlib import Path
 from collections import OrderedDict
 
+import pickle
 import dataclasses
-from dataclasses import asdict
 from dataclasses import field
 
 from typing import Callable
@@ -25,14 +25,15 @@ from typing import Any
 from typing import List
 from typing import Tuple
 
-import jax
 import torch
-import pickle
-import flax.linen as nn
 import numpy as np
 import pennylane as qml
-from jax import numpy as jnp
 from torch.utils.data import DataLoader
+
+import jax
+import flax.linen as nn
+from jax import numpy as jnp
+from jax.tree_util import register_pytree_node_class
 
 from fast_qml.quantum_circuits.data_encoding import FeatureMap
 from fast_qml.quantum_circuits.data_encoding import AmplitudeEmbedding
@@ -44,44 +45,99 @@ from fast_qml.core.optimizer import ClassicalOptimizer
 from fast_qml.core.optimizer import HybridOptimizer
 
 
-@dataclasses.dataclass
+@register_pytree_node_class
 class EstimatorLayerParameters:
     """
-    A dataclass to hold parameters for an estimator layer.
+    A class to hold parameters for an estimator layer.
 
     Attributes:
-        q_weights: quantum weights
-        c_weights: classical weights
-        batch_stats: batch statistics for classical model
+        q_params: Quantum parameters.
+        c_params: Classical parameters.
+        batch_stats: Batch statistics for classical model.
     """
-    q_weights: jnp.ndarray = None
-    c_weights: Union[jnp.ndarray, Dict[str, Any]] = None
-    batch_stats: Union[jnp.ndarray, Dict[str, Any]] = None
-    total_params: int = 0
+    def __init__(
+            self,
+            q_params: Union[jnp.ndarray, None],
+            c_params: Union[jnp.ndarray, Dict[str, Any], None],
+            batch_stats: Union[jnp.ndarray, Dict[str, Any], None]
+    ):
+        self.q_params = q_params
+        self.c_params = c_params
+        self.batch_stats = batch_stats
 
-    def __post_init__(self):
-        if self.q_weights is not None and not isinstance(self.q_weights, jnp.ndarray):
-            raise TypeError("q_weights must be jnp.ndarray")
-        if self.c_weights is not None and not isinstance(self.c_weights, (jnp.ndarray, dict)):
-            raise TypeError("c_weights must be either jnp.ndarray or dict")
-        if self.batch_stats is not None and not isinstance(self.batch_stats, (jnp.ndarray, dict)):
-            raise TypeError("batch_stats must be either jnp.ndarray or dict")
+    def tree_flatten(self):
+        """
+        Prepares the class instance for JAX tree operations.
+        """
+        children = []
+        aux_data = {
+            'q_params': self.q_params,
+            'c_params': self.c_params,
+            'batch_stats': self.batch_stats
+        }
+        return children, aux_data
 
-        if self.q_weights is not None:
-            self.total_params += len(self.q_weights.ravel())
-        if self.c_weights is not None:
-            self.total_params += sum(x.size for x in jax.tree_leaves(self.c_weights))
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        """
+        Reconstructs the class instance from JAX tree operations.
+        """
+        return cls(*children, **aux_data)
+
+    def get_params_num(self):
+        """
+        Initializes the total_params attribute based on the weights and batch stats.
+        """
+        total_params = 0
+        if self.q_params is not None:
+            total_params += len(self.q_params.ravel())
+        if self.c_params is not None:
+            total_params += sum(x.size for x in jax.tree_leaves(self.c_params))
+        return total_params
+
+    def __iter__(self):
+        """
+        Allow unpacking of the class instance.
+        """
+        yield self.q_params
+        yield self.c_params
+        yield self.batch_stats
+
+    def __repr__(self):
+        return (
+            f"{self.__class__.__name__}(\n"
+            f"    q_params={self.q_params!r},\n"
+            f"    c_params={self.c_params!r},\n"
+            f"    batch_stats={self.batch_stats!r},\n"
+            f"    total_params={self.get_params_num()!r}\n)"
+        )
 
 
 @dataclasses.dataclass
+@register_pytree_node_class
 class EstimatorParameters:
     layers_params: List[EstimatorLayerParameters]
     parameters: OrderedDict[str, Any] = field(default_factory=OrderedDict)
 
+    def tree_flatten(self):
+        """
+        Prepares the class instance for JAX tree operations.
+        """
+        children = [self.layers_params]
+        aux_data = {'parameters': self.parameters}
+        return children, aux_data
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        """
+        Reconstructs the class instance from JAX tree operations.
+        """
+        return cls(*children, **aux_data)
+
     def __post_init__(self):
         q_counts, c_counts = 0, 0
         for layer_params in self.layers_params:
-            q_params, c_params, batch_stats, _ = asdict(layer_params).values()
+            q_params, c_params, batch_stats = layer_params
 
             if q_params is not None:
                 self.parameters[f"QuantumLayer{q_counts}"] = q_params
@@ -258,7 +314,7 @@ class QuantumLayer(EstimatorLayer):
         @qml.qnode(device=self._device, interface="jax")
         def _q_node():
             self.quantum_circuit(
-                x_data=x_data, q_weights=self.params.q_weights)
+                x_data=x_data, q_weights=self.params.q_params)
 
             if not return_probs:
                 return [
@@ -371,7 +427,7 @@ class ClassicalLayer(EstimatorLayer):
             if training:
                 c_out, updates = self._c_module.apply(
                     {
-                        'params': self.params.c_weights,
+                        'params': self.params.c_params,
                         'batch_stats': self.params.batch_stats
                     },
                     x_data, train=training, mutable=['batch_stats'])
@@ -379,14 +435,14 @@ class ClassicalLayer(EstimatorLayer):
             else:
                 c_out = self._c_module.apply(
                     {
-                        'params': self.params.c_weights,
+                        'params': self.params.c_params,
                         'batch_stats': self.params.batch_stats
                     },
                     x_data, train=training, mutable=False)
                 output = jax.numpy.array(c_out), None
         else:
             c_out = self._c_module.apply(
-                {'params': self.params.c_weights}, x_data)
+                {'params': self.params.c_params}, x_data)
             output = jax.numpy.array(c_out), None
 
         return output[0] if flatten_output else output
