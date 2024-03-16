@@ -245,11 +245,11 @@ class QuantumLayer(EstimatorLayer):
             return_probs: Union[bool] = False
     ):
         """
-        Forward method of the quantum layer returning quantum node outputs.
+        Forward pass method of the quantum layer returning quantum node outputs.
 
         Args:
             x_data: Input data array.
-            return_probs:Indicates whether the quantum model shall return probabilities.
+            return_probs: Indicates whether the quantum model shall return probabilities.
 
         Returns:
             Outputs of the quantum node.
@@ -271,16 +271,29 @@ class QuantumLayer(EstimatorLayer):
 
     def backward_pass(
             self,
-            x_data,
-            y_data,
-            loss_fn):
+            x_data: jnp.ndarray,
+            y_data: jnp.ndarray,
+            loss_fn: Callable
+    ) -> Tuple[float, jnp.ndarray]:
+        """
+        Backward pass method of the quantum layer returning loss value and gradients.
+
+        Args:
+            x_data: Input data array.
+            y_data: Input data labels.
+            loss_fn: Loss function used to calculate loss.
+
+        Returns:
+            Tuple of loss value and gradients.
+        """
         def _calculate_loss(x, y):
             predictions = self.forward_pass(x_data=x)
             predictions = jnp.array(predictions).T
             loss_val = loss_fn(predictions, y).mean()
             return loss_val
 
-        loss, grads = jax.value_and_grad(_calculate_loss)(x_data, y_data)
+        loss, grads = jax.value_and_grad(
+            _calculate_loss)(x=x_data, y=y_data)
 
         return loss, grads
 
@@ -344,7 +357,7 @@ class ClassicalLayer(EstimatorLayer):
             flatten_output: Union[bool] = False
     ) -> jnp.ndarray:
         """
-        Forward method of the classical layer returning classical model outputs.
+        Forward pass method of the classical layer returning classical model outputs.
 
         Args:
             x_data: Input data.
@@ -380,10 +393,21 @@ class ClassicalLayer(EstimatorLayer):
 
     def backward_pass(
             self,
-            x_data,
-            y_data,
-            loss_fn
-    ):
+            x_data: jnp.ndarray,
+            y_data: jnp.ndarray,
+            loss_fn: Callable
+    ) -> Tuple[float, Union[jnp.ndarray, Dict[str, Any]]]:
+        """
+        Backward pass method of the classical layer returning loss value and gradients.
+
+        Args:
+            x_data: Input data array.
+            y_data: Input data labels.
+            loss_fn: Loss function used to calculate loss.
+
+        Returns:
+            Tuple of loss value and gradients.
+        """
         def _calculate_loss(x, y):
             outs = self.forward_pass(
                 x_data=x, training=True, flatten_output=False)
