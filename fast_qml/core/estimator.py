@@ -35,6 +35,7 @@ from jax import numpy as jnp
 from torch.utils.data import DataLoader
 
 from fast_qml.quantum_circuits.data_encoding import FeatureMap
+from fast_qml.quantum_circuits.data_encoding import AmplitudeEmbedding
 from fast_qml.quantum_circuits.ansatz import VariationalForm
 
 from fast_qml.core.callbacks import EarlyStopping
@@ -145,8 +146,8 @@ class QuantumLayer(EstimatorLayer):
     def __init__(
             self,
             n_qubits: int,
+            feature_map: FeatureMap,
             ansatz: VariationalForm,
-            feature_map: Union[FeatureMap, None] = None,
             layers_num: Union[int, None] = None,
             measurement_op: Callable = qml.PauliZ,
             measurements_num: int = 1,
@@ -165,10 +166,13 @@ class QuantumLayer(EstimatorLayer):
                 "Invalid measurement operation provided."
             )
 
-        if feature_map is None and data_reuploading is True:
+        # Validate if data reuploading is possible
+        if data_reuploading and isinstance(feature_map, AmplitudeEmbedding):
             raise ValueError(
-                "Data reuploading cannot be applied with no feature_map provided."
+                "Data reuploading is not compatible with Amplitude Embedding ansatz. PennyLane "
+                "does not allow to use multiple state preparation operations at the moment."
             )
+
 
         self._n_qubits = n_qubits
         self._ansatz = ansatz
@@ -219,10 +223,8 @@ class QuantumLayer(EstimatorLayer):
             q_weights: Union[jnp.ndarray, None] = None
     ) -> None:
         """
-        Applies the quantum circuit.
-
-        This method is conditional on the data reuploading flag. If data reuploading is enabled,
-        the feature map is applied at every layer.
+        Applies the quantum circuit. This method is conditional on the data reuploading flag.
+        If data reuploading is enabled, the feature map is applied at every layer.
 
         Args:
             x_data: Input data to be encoded into the quantum state.
@@ -233,14 +235,8 @@ class QuantumLayer(EstimatorLayer):
             for i in range(self._layers_num):
                 self._ansatz.apply(params=q_weights[i])
         else:
-            if self._feature_map is not None and x_data is None:
-                raise ValueError(
-                    "The input array x_data must be provided for the feature map."
-                )
-
             for i in range(self._layers_num):
-                if self._feature_map is not None:
-                    self._feature_map.apply(features=x_data)
+                self._feature_map.apply(features=x_data)
                 self._ansatz.apply(params=q_weights[i])
 
     def forward_pass(
