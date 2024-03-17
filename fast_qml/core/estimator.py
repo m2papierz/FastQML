@@ -8,9 +8,11 @@
 #
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
+import os
 from abc import abstractmethod
 from functools import partial
 from collections import OrderedDict
+from pathlib import Path
 
 from typing import Callable
 from typing import Union
@@ -20,6 +22,7 @@ from typing import Any
 from typing import List
 from typing import Tuple
 
+import pickle
 import torch
 from torch.utils.data import DataLoader
 
@@ -728,3 +731,41 @@ class Estimator:
         )
 
         self._params = optimizer.parameters
+
+    def model_save(
+            self,
+            directory: str,
+            name: str
+    ) -> None:
+        """
+        Saves the model parameters to a pickle file. This method saves the current state of the model
+        parameters to a specified directory with a given name.
+
+        Args:
+            directory: The directory path where the model should be saved.
+            name: The name of the file to save the model parameters.
+
+        The model is saved in a binary file with a `.model` extension.
+        """
+        dir_ = Path(directory)
+        if not os.path.exists(dir_):
+            os.mkdir(dir_)
+
+        with open(dir_ / f"{name}.model", 'wb') as f:
+            pickle.dump(self.params, f)
+
+    def model_load(
+            self,
+            path: str
+    ) -> None:
+        """
+        Loads model parameters from a pickle file. This method loads the model parameters from a specified
+        file path, updating the `params` attribute of the instance.
+
+        Args:
+            path: The file path to load the model parameters from.
+
+        The method expects a binary file with saved model parameters.
+        """
+        with open(Path(path), 'rb') as f:
+            self._params = pickle.load(f)
