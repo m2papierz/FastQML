@@ -55,6 +55,13 @@ class ParametersOptimizer:
 
         self._train_loader, self._val_loader = None, None
 
+    @property
+    def parameters(self) -> OrderedDict:
+        """
+        Property returning parameters of the optimizer.
+        """
+        return self._parameters
+
     def tree_flatten(self):
         """
         Prepares the class instance for JAX tree operations.
@@ -199,7 +206,7 @@ class ParametersOptimizer:
         """
         loss_val, grads = jax.value_and_grad(
             self._compute_loss, argnums=0
-        )(params=params, x_data=data, y_data=targets)
+        )(params, x_data=data, y_data=targets)
 
         # Update quantum model parameters
         updates, opt_state = self._opt.update(grads, opt_state, params)
@@ -321,18 +328,17 @@ class ParametersOptimizer:
             train_loss, opt_state = self._training_epoch(opt_state=opt_state)
             val_loss = self._validation_epoch()
 
-            # if self._best_model_checkpoint:
-            #     # TODO: Update model checkpoint
-            #     self._best_model_checkpoint.update(
-            #         current_val_loss=val_loss, current_q_params=self._q_params)
-            #
-            # # Early stopping logic
-            # if self._early_stopping:
-            #     self._early_stopping(val_loss)
-            #     if self._early_stopping.stop_training:
-            #         if verbose:
-            #             print(f"Stopping early at epoch {epoch}.")
-            #         break
+            if self._best_model_checkpoint:
+                self._best_model_checkpoint.update(
+                    current_val_loss=val_loss, current_params=self._parameters)
+
+            # Early stopping logic
+            if self._early_stopping:
+                self._early_stopping(val_loss)
+                if self._early_stopping.stop_training:
+                    if verbose:
+                        print(f"Stopping early at epoch {epoch}.")
+                    break
 
             if verbose:
                 print(
@@ -340,6 +346,6 @@ class ParametersOptimizer:
                     f"train_loss: {train_loss:.5f} - val_loss: {val_loss:.5f}"
                 )
 
-        # # Load best model parameters at the end of training
-        # if self._best_model_checkpoint:
-        #     self._best_model_checkpoint.load_best_model(self)
+        # Load best model parameters at the end of training
+        if self._best_model_checkpoint:
+            self._best_model_checkpoint.load_best_model(self)
