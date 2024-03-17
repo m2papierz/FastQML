@@ -19,13 +19,9 @@ from typing import Any
 from typing import List
 from typing import Tuple
 
-import torch
-import numpy as np
-import pennylane as qml
-from torch.utils.data import DataLoader
-
 import jax
 import flax.linen as nn
+import pennylane as qml
 from jax import numpy as jnp
 from jax.tree_util import register_pytree_node_class
 
@@ -34,12 +30,6 @@ from fast_qml.quantum_circuits.data_encoding import AmplitudeEmbedding
 from fast_qml.quantum_circuits.ansatz import VariationalForm
 
 from fast_qml.core.dataclasses import EstimatorLayerParameters
-from fast_qml.core.dataclasses import EstimatorParameters
-from fast_qml.core.callbacks import EarlyStopping
-from fast_qml.core.optimizer import QuantumOptimizer
-from fast_qml.core.optimizer import ClassicalOptimizer
-from fast_qml.core.optimizer import HybridOptimizer
-
 
 class EstimatorLayer:
     def __init__(
@@ -134,7 +124,6 @@ class QuantumLayer(EstimatorLayer):
         """
         Prepares the class instance for JAX tree operations.
         """
-        children = []
         aux_data = {
             'n_qubits': self._n_qubits,
             'feature_map': self._feature_map,
@@ -144,7 +133,7 @@ class QuantumLayer(EstimatorLayer):
             'measurements_num': self._measurements_num,
             'data_reuploading': self._data_reuploading
         }
-        return children, aux_data
+        return [], aux_data
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
@@ -226,8 +215,9 @@ class QuantumLayer(EstimatorLayer):
         Returns:
             Outputs of the quantum node.
         """
-        @jax.jit
-        @qml.qnode(device=qml.device(name="default.qubit.jax", wires=self._n_qubits), interface="jax")
+        dev = qml.device(name="default.qubit.jax", wires=self._n_qubits)
+
+        @qml.qnode(device=dev, interface="jax")
         def _q_node():
             self.quantum_circuit(
                 x_data=x_data, q_weights=q_params)
@@ -240,6 +230,33 @@ class QuantumLayer(EstimatorLayer):
             else:
                 return qml.probs(wires=range(self._n_qubits))
         return jnp.array(_q_node()).T
+
+    @partial(jax.jit, static_argnums=(4,))
+    def _compute_loss(
+            self,
+            q_params: jnp.ndarray,
+            x_data: jnp.ndarray,
+            y_data: jnp.ndarray,
+            loss_fn: Callable
+    ):
+        """
+        Computes the loss of the model for a given batch of data. This method performs a forward
+        pass using the model's parameters and the input data, and computes the loss using the provided
+        loss function.
+
+        Args:
+            q_params: Parameters of the quantum model.
+            x_data: Input data array.
+            y_data: Target data array.
+            loss_fn: The loss function to compute the loss between the predictions and the target data.
+
+        Returns:
+            The mean loss computed for the input data batch.
+        """
+        predictions =self.forward_pass(
+            q_params=q_params, x_data=x_data)
+
+        return loss_fn(predictions, y_data).mean()
 
     @partial(jax.jit, static_argnums=(3,))
     def backward_pass(
@@ -257,15 +274,12 @@ class QuantumLayer(EstimatorLayer):
             loss_fn: Loss function used to calculate loss.
 
         Returns:
-            Tuple of loss value and gradients.
+            Tuple of the loss value and the gradients.
         """
-        def _calculate_loss(q_params, x, y):
-            predictions = self.forward_pass(q_params=q_params, x_data=x)
-            loss_val = loss_fn(predictions, y).mean()
-            return loss_val
-
+        # Compute gradients and the loss value for the batch of data
         loss, grads = jax.value_and_grad(
-            _calculate_loss, argnums=0)(self.params.q_params, x_data, y_data)
+            fun=self._compute_loss,
+            argnums=0)(self.params.q_params, x_data, y_data, loss_fn)
 
         return loss, grads
 
@@ -293,13 +307,12 @@ class ClassicalLayer(EstimatorLayer):
         """
         Prepares the class instance for JAX tree operations.
         """
-        children = []
         aux_data = {
             'input_shape': self._input_shape,
             'c_module': self._c_module,
             'batch_norm': self._batch_norm,
         }
-        return children, aux_data
+        return [], aux_data
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
@@ -384,6 +397,45 @@ class ClassicalLayer(EstimatorLayer):
 
         return output[0] if flatten_output else output
 
+    @partial(jax.jit, static_argnums=(5,))
+    def _compute_loss(
+            self,
+            c_params: Dict[str, Mapping[str, jnp.ndarray]],
+            batch_stats: Dict[str, Mapping[str, jnp.ndarray]],
+            x_data: jnp.ndarray,
+            y_data: jnp.ndarray,
+            loss_fn: Callable
+    ):
+        """
+        Computes the loss of the model for a given batch of data.
+
+        This method performs a forward pass using the model's parameters and the input data,
+        computes the loss using the provided loss function, and updates the batch statistics
+        if applicable.
+
+        Args:
+            c_params: Parameters of the classical model.
+            batch_stats: Batch normalization statistics for the classical model.
+            x_data: Input data array.
+            y_data: Target data array.
+            loss_fn: The loss function to compute the loss between the predictions and the target data.
+
+        Returns:
+            The mean loss computed for the input data batch.
+        """
+        predictions, batch_stats = self.forward_pass(
+            x_data=x_data,
+            c_params=c_params,
+            batch_stats=batch_stats,
+            training=True,  flatten_output=False
+        )
+
+        # Update batch statistics if applicable
+        if batch_stats:
+            self.params.batch_stats = batch_stats
+
+        return loss_fn(predictions, y_data).mean()
+
     @partial(jax.jit, static_argnums=(3,))
     def backward_pass(
             self,
@@ -400,65 +452,39 @@ class ClassicalLayer(EstimatorLayer):
             loss_fn: Loss function used to calculate loss.
 
         Returns:
-            Tuple of loss value and gradients.
+            Tuple of the loss value and the gradients.
         """
-        def _calculate_loss(c_params, batch_stats, x, y):
-            predictions, self.params.batch_stats = self.forward_pass(
-                x_data=x, c_params=c_params, batch_stats=batch_stats,
-                training=True, flatten_output=False
-            )
-            loss_val = loss_fn(predictions, y).mean()
-            return loss_val, self.params.batch_stats
-
-        (loss, self.params.batch_stats), grads = jax.value_and_grad(
-            _calculate_loss, argnums=0, has_aux=True
-        )(self.params.c_params, self.params.batch_stats, x_data, y_data)
+       # Compute gradients and the loss value for the batch of data
+        loss, grads = jax.value_and_grad(
+            self._compute_loss, argnums=0
+        )(self.params.c_params, self.params.batch_stats, x_data, y_data, loss_fn)
 
         return loss, grads
 
 
+@register_pytree_node_class
 class Estimator:
-    """
-    An abstract base class for creating machine learning estimators. This class provides a template
-    for  implementing machine learning estimators with basic functionalities of model training, saving,
-    and loading.
-    """
-    random_seed: int = 0
-
     def __init__(
             self,
-            loss_fn: Callable,
-            optimizer_fn: Callable,
-            layers: List[EstimatorLayer],
-            estimator_type: str
+            layers: List[EstimatorLayer]
     ):
-        self.loss_fn = loss_fn
-        self.optimizer_fn = optimizer_fn
-        self.estimator_type = estimator_type
-        self.input_shape = None
-
-        # Define estimator layers
         self.layers = layers
 
-        # Initiate estimator optimizer
-        self._trainer = self._init_trainer()
-
-    def _init_trainer(self):
+    def tree_flatten(self):
         """
-        Initializes and returns an optimizer based on the specified estimator type.
+        Prepares the class instance for JAX tree operations.
         """
-        if self.estimator_type == 'quantum':
-            return QuantumOptimizer
-        elif self.estimator_type == 'classical':
-            return ClassicalOptimizer
-        elif self.estimator_type == 'hybrid':
-            return HybridOptimizer
-        else:
-            raise ValueError(
-                f"Invalid optimizer type: {self.estimator_type},"
-                f" available options are {'quantum', 'classical', 'hybrid'}"
-            )
+        aux_data = {'layers': self.layers}
+        return [], aux_data
 
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        """
+        Reconstructs the class instance from JAX tree operations.
+        """
+        return cls(*children, **aux_data)
+
+    @partial(jax.jit, static_argnums=(2, 3))
     def forward(
             self,
             x_data: jnp.ndarray,
@@ -494,56 +520,3 @@ class Estimator:
                 )
 
         return output
-
-
-    def fit(
-            self,
-            train_data: Union[np.ndarray, torch.Tensor, DataLoader],
-            val_data: Union[np.ndarray, torch.Tensor, DataLoader],
-            train_targets: Union[np.ndarray, torch.Tensor, None] = None,
-            val_targets: Union[np.ndarray, torch.Tensor, None] = None,
-            learning_rate: float = 0.01,
-            num_epochs: int = 500,
-            batch_size: int = None,
-            early_stopping: EarlyStopping = None,
-            verbose: bool = True
-    ) -> None:
-        """
-        ....
-
-        Args:
-            train_data: Input features for training.
-            train_targets: Target outputs for training.
-            val_data: Input features for validation.
-            val_targets: Target outputs for validation.
-            learning_rate: Learning rate for the optimizer.
-            num_epochs: Number of epochs to run the training.
-            batch_size: Size of batches for training. If None, the whole dataset is used in each iteration.
-            early_stopping: Instance of EarlyStopping to be used during training.
-            verbose : If True, prints verbose messages during training.
-
-        If early stopping is configured and validation data is provided, the training process will
-        stop early if no improvement is seen in the validation loss for a specified number of epochs.
-        """
-        trainer = self._trainer(
-            c_params=self.params.c_weights,
-            q_params=self.params.q_weights,
-            batch_stats=self.params.batch_stats,
-            model=self.forward,
-            loss_fn=self.loss_fn,
-            c_optimizer=self.optimizer_fn(learning_rate),
-            q_optimizer=self.optimizer_fn(learning_rate),
-            batch_size=batch_size,
-            early_stopping=early_stopping
-        )
-
-        trainer.optimize(
-            train_data=train_data,
-            train_targets=train_targets,
-            val_data=val_data,
-            val_targets=val_targets,
-            epochs_num=num_epochs,
-            verbose=verbose
-        )
-
-        self.params = EstimatorParameters(**trainer.parameters)
