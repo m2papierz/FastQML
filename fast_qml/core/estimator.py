@@ -160,7 +160,8 @@ class EstimatorLayer:
         self._init_args = init_args
 
         # Initiate layer parameters
-        self.params = EstimatorLayerParameters()
+        self.params = EstimatorLayerParameters(
+            q_params=None, c_params=None, batch_stats=None)
         self.init_parameters()
 
     def init_parameters(self):
@@ -204,7 +205,7 @@ class QuantumLayer(EstimatorLayer):
             n_qubits: int,
             feature_map: FeatureMap,
             ansatz: VariationalForm,
-            layers_num: Union[int, None] = None,
+            layers_num: Union[int, None] = 1,
             measurement_op: Callable = qml.PauliZ,
             measurements_num: int = 1,
             data_reuploading: bool = False
@@ -264,7 +265,10 @@ class QuantumLayer(EstimatorLayer):
             shape = (layers_n, *n_ansatz_params) if layers_n else [*n_ansatz_params]
 
         weights = 0.1 * jax.random.normal(key, shape=shape)
-        return {'q_weights': weights}
+
+        return {
+            'q_params': weights, 'c_params': None, 'batch_stats': None
+        }
 
     @staticmethod
     def _is_valid_measurement_op(measurement_op):
@@ -298,6 +302,7 @@ class QuantumLayer(EstimatorLayer):
     def forward_pass(
             self,
             x_data: jnp.ndarray,
+            q_params: jnp.ndarray,
             return_probs: Union[bool] = False
     ):
         """
@@ -305,6 +310,7 @@ class QuantumLayer(EstimatorLayer):
 
         Args:
             x_data: Input data array.
+            q_params: Parameters for the quantum circuit.
             return_probs: Indicates whether the quantum model shall return probabilities.
 
         Returns:
@@ -314,7 +320,7 @@ class QuantumLayer(EstimatorLayer):
         @qml.qnode(device=self._device, interface="jax")
         def _q_node():
             self.quantum_circuit(
-                x_data=x_data, q_weights=self.params.q_params)
+                x_data=x_data, q_weights=q_params)
 
             if not return_probs:
                 return [
@@ -342,14 +348,14 @@ class QuantumLayer(EstimatorLayer):
         Returns:
             Tuple of loss value and gradients.
         """
-        def _calculate_loss(x, y):
-            predictions = self.forward_pass(x_data=x)
+        def _calculate_loss(q_params, x, y):
+            predictions = self.forward_pass(q_params=q_params, x_data=x)
             predictions = jnp.array(predictions).T
             loss_val = loss_fn(predictions, y).mean()
             return loss_val
 
         loss, grads = jax.value_and_grad(
-            _calculate_loss)(x=x_data, y=y_data)
+            _calculate_loss, argnums=0)(self.params.q_params, x_data, y_data)
 
         return loss, grads
 
@@ -372,7 +378,7 @@ class ClassicalLayer(EstimatorLayer):
 
     def _sample_parameters(
             self,
-            c_model: nn.Module,
+            c_module: nn.Module,
             input_shape: Union[int, Tuple[int], None] = None,
             batch_norm: Union[bool, None] = None
     ):
@@ -380,7 +386,7 @@ class ClassicalLayer(EstimatorLayer):
         Samples randomly classical layer parameters.
 
         Args:
-            c_model: The classical model component.
+            c_module: The classical model component.
             input_shape: The shape of the input data for the classical component of the hybrid model.
             batch_norm: Boolean indicating whether classical model uses batch normalization.
 
@@ -398,25 +404,33 @@ class ClassicalLayer(EstimatorLayer):
         c_inp = jax.random.normal(inp_rng, shape=self.input_shape)
 
         if batch_norm:
-            variables = c_model.init(init_rng, c_inp, train=False)
+            variables = c_module.init(init_rng, c_inp, train=False)
             weights, batch_stats = variables['params'], variables['batch_stats']
-            return {'c_weights': weights, 'batch_stats': batch_stats}
+            return {
+                'q_params': None, 'c_params': weights, 'batch_stats': batch_stats
+            }
         else:
-            variables = c_model.init(init_rng, c_inp)
+            variables = c_module.init(init_rng, c_inp)
             weights = variables['params']
-            return {'c_weights': weights}
+            return {
+                'q_params': None, 'c_params': weights, 'batch_stats': None
+            }
 
     def forward_pass(
             self,
             x_data: jnp.ndarray,
-            training: Union[bool, None] = None,
-            flatten_output: Union[bool] = False
+            c_params: Dict[str, Mapping[str, jnp.ndarray]],
+            batch_stats: Dict[str, Mapping[str, jnp.ndarray]],
+            training: bool = False,
+            flatten_output: bool = False
     ) -> jnp.ndarray:
         """
         Forward pass method of the classical layer returning classical model outputs.
 
         Args:
             x_data: Input data.
+            c_params: Parameters of the classical model.
+            batch_stats: Batch normalization statistics for the classical model.
             training: Indicates whether the model is being used for training or inference.
             flatten_output: Indicates whether to flatten the output.
 
@@ -426,23 +440,17 @@ class ClassicalLayer(EstimatorLayer):
         if self._batch_norm:
             if training:
                 c_out, updates = self._c_module.apply(
-                    {
-                        'params': self.params.c_params,
-                        'batch_stats': self.params.batch_stats
-                    },
+                    {'params': c_params, 'batch_stats': batch_stats},
                     x_data, train=training, mutable=['batch_stats'])
                 output = jax.numpy.array(c_out), updates['batch_stats']
             else:
                 c_out = self._c_module.apply(
-                    {
-                        'params': self.params.c_params,
-                        'batch_stats': self.params.batch_stats
-                    },
+                    {'params': c_params,'batch_stats': batch_stats},
                     x_data, train=training, mutable=False)
                 output = jax.numpy.array(c_out), None
         else:
             c_out = self._c_module.apply(
-                {'params': self.params.c_params}, x_data)
+                {'params': c_params}, x_data)
             output = jax.numpy.array(c_out), None
 
         return output[0] if flatten_output else output
@@ -464,20 +472,17 @@ class ClassicalLayer(EstimatorLayer):
         Returns:
             Tuple of loss value and gradients.
         """
-        def _calculate_loss(x, y):
-            outs = self.forward_pass(
-                x_data=x, training=True, flatten_output=False)
-
-            if self.params.batch_stats:
-                predictions, self.params.batch_stats = outs
-            else:
-                predictions = outs
-
+        def _calculate_loss(c_params, batch_stats, x, y):
+            predictions, self.params.batch_stats = self.forward_pass(
+                x_data=x, c_params=c_params, batch_stats=batch_stats,
+                training=True, flatten_output=False
+            )
             loss_val = loss_fn(predictions, y).mean()
             return loss_val, self.params.batch_stats
 
-        (loss, batch_stats), grads = jax.value_and_grad(
-            _calculate_loss, has_aux=True)(x_data, y_data)
+        (loss, self.params.batch_stats), grads = jax.value_and_grad(
+            _calculate_loss, argnums=0, has_aux=True
+        )(self.params.c_params, self.params.batch_stats, x_data, y_data)
 
         return loss, grads
 
