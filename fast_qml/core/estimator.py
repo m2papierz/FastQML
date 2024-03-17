@@ -266,9 +266,7 @@ class QuantumLayer(EstimatorLayer):
 
         weights = 0.1 * jax.random.normal(key, shape=shape)
 
-        return {
-            'q_params': weights, 'c_params': None, 'batch_stats': None
-        }
+        return {'q_params': weights, 'c_params': None, 'batch_stats': None}
 
     @staticmethod
     def _is_valid_measurement_op(measurement_op):
@@ -406,15 +404,11 @@ class ClassicalLayer(EstimatorLayer):
         if batch_norm:
             variables = c_module.init(init_rng, c_inp, train=False)
             weights, batch_stats = variables['params'], variables['batch_stats']
-            return {
-                'q_params': None, 'c_params': weights, 'batch_stats': batch_stats
-            }
         else:
             variables = c_module.init(init_rng, c_inp)
-            weights = variables['params']
-            return {
-                'q_params': None, 'c_params': weights, 'batch_stats': None
-            }
+            weights, batch_stats = variables['params'], None
+
+        return {'q_params': None, 'c_params': weights, 'batch_stats': batch_stats}
 
     def forward_pass(
             self,
