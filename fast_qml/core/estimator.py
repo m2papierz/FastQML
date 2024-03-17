@@ -30,7 +30,73 @@ from fast_qml.quantum_circuits.data_encoding import FeatureMap
 from fast_qml.quantum_circuits.data_encoding import AmplitudeEmbedding
 from fast_qml.quantum_circuits.ansatz import VariationalForm
 
-from fast_qml.core.dataclasses import EstimatorLayerParameters
+
+@register_pytree_node_class
+class EstimatorLayerParameters:
+    """
+    A class to hold parameters for an estimator layer.
+
+    Attributes:
+        q_params: Quantum parameters.
+        c_params: Classical parameters.
+        batch_stats: Batch statistics for classical model.
+    """
+    def __init__(
+            self,
+            q_params: Union[jnp.ndarray, None],
+            c_params: Union[jnp.ndarray, Dict[str, Any], None],
+            batch_stats: Union[jnp.ndarray, Dict[str, Any], None]
+    ):
+        self.q_params = q_params
+        self.c_params = c_params
+        self.batch_stats = batch_stats
+
+    def tree_flatten(self):
+        """
+        Prepares the class instance for JAX tree operations.
+        """
+        children = []
+        aux_data = {
+            'q_params': self.q_params,
+            'c_params': self.c_params,
+            'batch_stats': self.batch_stats
+        }
+        return children, aux_data
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        """
+        Reconstructs the class instance from JAX tree operations.
+        """
+        return cls(*children, **aux_data)
+
+    def get_params_num(self):
+        """
+        Initializes the total_params attribute based on the weights and batch stats.
+        """
+        total_params = 0
+        if self.q_params is not None:
+            total_params += len(self.q_params.ravel())
+        if self.c_params is not None:
+            total_params += sum(x.size for x in jax.tree_leaves(self.c_params))
+        return total_params
+
+    def __iter__(self):
+        """
+        Allow unpacking of the class instance.
+        """
+        yield self.q_params
+        yield self.c_params
+        yield self.batch_stats
+
+    def __repr__(self):
+        return (
+            f"{self.__class__.__name__}(\n"
+            f"    q_params={self.q_params!r},\n"
+            f"    c_params={self.c_params!r},\n"
+            f"    batch_stats={self.batch_stats!r},\n"
+            f"    total_params={self.get_params_num()!r}\n)"
+        )
 
 
 class EstimatorLayer:
@@ -508,7 +574,7 @@ class Estimator:
         return cls(*children, **aux_data)
 
     @partial(jax.jit, static_argnums=(3, 4))
-    def forward(
+    def forward_pass(
             self,
             x_data: jnp.ndarray,
             e_params: Dict,
