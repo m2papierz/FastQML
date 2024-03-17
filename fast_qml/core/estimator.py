@@ -10,6 +10,7 @@
 
 from abc import abstractmethod
 from functools import partial
+from collections import OrderedDict
 
 from typing import Callable
 from typing import Union
@@ -30,6 +31,7 @@ from fast_qml.quantum_circuits.data_encoding import AmplitudeEmbedding
 from fast_qml.quantum_circuits.ansatz import VariationalForm
 
 from fast_qml.core.dataclasses import EstimatorLayerParameters
+
 
 class EstimatorLayer:
     def __init__(
@@ -469,6 +471,27 @@ class Estimator:
             layers: List[EstimatorLayer]
     ):
         self.layers = layers
+        self.params = self._init_parameters()
+
+    def _init_parameters(self):
+        q_counts, c_counts = 0, 0
+        parameters = OrderedDict()
+
+        for layer in self.layers:
+            q_params, c_params, batch_stats = layer.params
+
+            if q_params is not None:
+                parameters[f"QuantumLayer{q_counts}"] = q_params
+                q_counts += 1
+
+            if c_params is not None:
+                if batch_stats is not None:
+                    parameters[f"ClassicalLayer{c_counts}"] = [c_params, batch_stats]
+                else:
+                    parameters[f"ClassicalLayer{c_counts}"] = c_params
+                c_counts += 1
+
+        return parameters
 
     def tree_flatten(self):
         """
@@ -484,10 +507,11 @@ class Estimator:
         """
         return cls(*children, **aux_data)
 
-    @partial(jax.jit, static_argnums=(2, 3))
+    @partial(jax.jit, static_argnums=(3, 4))
     def forward(
             self,
             x_data: jnp.ndarray,
+            e_params: Dict,
             return_q_probs: bool = False,
             flatten_c_output: bool = False
     ):
@@ -496,6 +520,7 @@ class Estimator:
 
         Args:
             x_data: Input data.
+            e_params:
             return_q_probs: Indicates whether the quantum model shall return probabilities.
             flatten_c_output: Indicates whether to flatten the classical output.
 
@@ -503,17 +528,16 @@ class Estimator:
             Output logits of the estimator.
         """
         output = x_data
-        for layer in self.layers:
+        for layer, params in zip(self.layers, e_params.values()):
             q_params, c_params, batch_stats = layer.params
 
             if isinstance(layer, QuantumLayer):
                 output = layer.forward_pass(
-                    x_data=output, q_params=q_params, return_probs=return_q_probs)
+                    x_data=output, q_params=params, return_probs=return_q_probs)
             elif isinstance(layer, ClassicalLayer):
-                output, batch_stats = layer.forward_pass(
-                    x_data=output, c_params=c_params, batch_stats=batch_stats,
+                output, _ = layer.forward_pass(
+                    x_data=output, c_params=params, batch_stats=batch_stats,
                     flatten_output=flatten_c_output)
-                layer.params.batch_stats = batch_stats
             else:
                 raise ValueError(
                     f"Estimator layer type not recognized: {type(layer)}"
