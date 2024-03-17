@@ -237,7 +237,8 @@ class QuantumLayer(EstimatorLayer):
         else:
             shape = (layers_n, *n_ansatz_params) if layers_n else [*n_ansatz_params]
 
-        weights = 0.1 * jax.random.normal(key, shape=shape)
+        weights = 0.1 * jax.random.normal(
+            key, shape=shape, dtype=jnp.float32)
 
         return {'q_params': weights, 'c_params': None, 'batch_stats': None}
 
@@ -419,7 +420,8 @@ class ClassicalLayer(EstimatorLayer):
         else:
             self.input_shape = (1, *input_shape)
 
-        c_inp = jax.random.normal(inp_rng, shape=self.input_shape)
+        c_inp = jax.random.normal(
+            inp_rng, shape=self.input_shape, dtype=jnp.float32)
 
         if batch_norm:
             variables = c_module.init(init_rng, c_inp, train=False)
