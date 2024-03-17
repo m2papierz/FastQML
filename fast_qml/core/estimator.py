@@ -610,3 +610,57 @@ class Estimator:
                 )
 
         return output
+
+    @partial(jax.jit, static_argnums=(4,))
+    def _compute_loss(
+            self,
+            e_params: OrderedDict,
+            x_data: jnp.ndarray,
+            y_data: jnp.ndarray,
+            loss_fn: Callable
+    ):
+        """
+        Computes the loss of the estimator for a given batch of data.
+
+        Args:
+            e_params: Parameters of the estimator.
+            x_data: Input data array.
+            y_data: Target data array.
+            loss_fn: The loss function to compute the loss between the predictions and the target data.
+
+        Returns:
+            The mean loss computed for the input data batch.
+        """
+        predictions = self.forward_pass(
+            x_data=x_data,
+            e_params=e_params,
+            return_q_probs=False,
+            flatten_c_output=False
+        )
+
+        return loss_fn(predictions, y_data).mean()
+
+    @partial(jax.jit, static_argnums=(3,))
+    def backward_pass(
+            self,
+            x_data: jnp.ndarray,
+            y_data: jnp.ndarray,
+            loss_fn: Callable
+    ) -> Tuple[float, OrderedDict]:
+        """
+        Backward pass method of the estimator returning loss value and gradients.
+
+        Args:
+            x_data: Input data array.
+            y_data: Input data labels.
+            loss_fn: Loss function used to calculate loss.
+
+        Returns:
+            Tuple of the loss value and the gradients.
+        """
+        # Compute gradients and the loss value for the batch of data
+        loss, grads = jax.value_and_grad(
+            self._compute_loss, argnums=0
+        )(self.params, x_data, y_data, loss_fn)
+
+        return loss, grads
