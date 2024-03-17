@@ -9,6 +9,7 @@
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
 from abc import abstractmethod
+from functools import partial
 
 from typing import Callable
 from typing import Union
@@ -26,6 +27,7 @@ from torch.utils.data import DataLoader
 import jax
 import flax.linen as nn
 from jax import numpy as jnp
+from jax.tree_util import register_pytree_node_class
 
 from fast_qml.quantum_circuits.data_encoding import FeatureMap
 from fast_qml.quantum_circuits.data_encoding import AmplitudeEmbedding
@@ -87,6 +89,7 @@ class EstimatorLayer:
         raise NotImplementedError("Subclasses must implement this method.")
 
 
+@register_pytree_node_class
 class QuantumLayer(EstimatorLayer):
     def __init__(
             self,
@@ -127,8 +130,28 @@ class QuantumLayer(EstimatorLayer):
         self._measurements_num = measurements_num
         self._data_reuploading = data_reuploading
 
-        self._device = qml.device(
-            name="default.qubit.jax", wires=self._n_qubits)
+    def tree_flatten(self):
+        """
+        Prepares the class instance for JAX tree operations.
+        """
+        children = []
+        aux_data = {
+            'n_qubits': self._n_qubits,
+            'feature_map': self._feature_map,
+            'ansatz': self._ansatz,
+            'layers_num': self._layers_num,
+            'measurement_op': self._measurement_op,
+            'measurements_num': self._measurements_num,
+            'data_reuploading': self._data_reuploading
+        }
+        return children, aux_data
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        """
+        Reconstructs the class instance from JAX tree operations.
+        """
+        return cls(*children, **aux_data)
 
     def _sample_parameters(
             self,
@@ -185,6 +208,7 @@ class QuantumLayer(EstimatorLayer):
                 self._feature_map.apply(features=x_data)
                 self._ansatz.apply(params=q_weights[i])
 
+    @partial(jax.jit, static_argnums=(3,))
     def forward_pass(
             self,
             x_data: jnp.ndarray,
@@ -203,7 +227,7 @@ class QuantumLayer(EstimatorLayer):
             Outputs of the quantum node.
         """
         @jax.jit
-        @qml.qnode(device=self._device, interface="jax")
+        @qml.qnode(device=qml.device(name="default.qubit.jax", wires=self._n_qubits), interface="jax")
         def _q_node():
             self.quantum_circuit(
                 x_data=x_data, q_weights=q_params)
@@ -217,6 +241,7 @@ class QuantumLayer(EstimatorLayer):
                 return qml.probs(wires=range(self._n_qubits))
         return jnp.array(_q_node()).T
 
+    @partial(jax.jit, static_argnums=(3,))
     def backward_pass(
             self,
             x_data: jnp.ndarray,
@@ -245,6 +270,7 @@ class QuantumLayer(EstimatorLayer):
         return loss, grads
 
 
+@register_pytree_node_class
 class ClassicalLayer(EstimatorLayer):
     def __init__(
             self,
@@ -259,8 +285,28 @@ class ClassicalLayer(EstimatorLayer):
                 'batch_norm': batch_norm
             }
         )
+        self._input_shape = input_shape
         self._c_module = c_module
         self._batch_norm = batch_norm
+
+    def tree_flatten(self):
+        """
+        Prepares the class instance for JAX tree operations.
+        """
+        children = []
+        aux_data = {
+            'input_shape': self._input_shape,
+            'c_module': self._c_module,
+            'batch_norm': self._batch_norm,
+        }
+        return children, aux_data
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        """
+        Reconstructs the class instance from JAX tree operations.
+        """
+        return cls(*children, **aux_data)
 
     def _sample_parameters(
             self,
@@ -298,6 +344,7 @@ class ClassicalLayer(EstimatorLayer):
 
         return {'q_params': None, 'c_params': weights, 'batch_stats': batch_stats}
 
+    @partial(jax.jit, static_argnums=(4, 5))
     def forward_pass(
             self,
             x_data: jnp.ndarray,
@@ -337,6 +384,7 @@ class ClassicalLayer(EstimatorLayer):
 
         return output[0] if flatten_output else output
 
+    @partial(jax.jit, static_argnums=(3,))
     def backward_pass(
             self,
             x_data: jnp.ndarray,
