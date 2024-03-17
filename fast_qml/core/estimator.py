@@ -8,14 +8,8 @@
 #
 # THERE IS NO WARRANTY for the FastQML library, as per Section 15 of the GPL v3.
 
-import os
 from abc import abstractmethod
-from pathlib import Path
 from collections import OrderedDict
-
-import pickle
-import dataclasses
-from dataclasses import field
 
 from typing import Callable
 from typing import Union
@@ -113,18 +107,41 @@ class EstimatorLayerParameters:
         )
 
 
-@dataclasses.dataclass
 @register_pytree_node_class
 class EstimatorParameters:
-    layers_params: List[EstimatorLayerParameters]
-    parameters: OrderedDict[str, Any] = field(default_factory=OrderedDict)
+    def __init__(
+            self,
+            layers_params: List[EstimatorLayerParameters]
+    ):
+        self.layers_params = layers_params
+        self.parameters = self._init_parameters()
+
+    def _init_parameters(self) -> OrderedDict:
+        q_counts, c_counts = 0, 0
+        parameters = OrderedDict()
+
+        for layer_params in self.layers_params:
+            q_params, c_params, batch_stats = layer_params
+
+            if q_params is not None:
+                parameters[f"QuantumLayer{q_counts}"] = q_params
+                q_counts += 1
+
+            if c_params is not None:
+                if batch_stats is not None:
+                    parameters[f"ClassicalLayer{c_counts}"] = [c_params, batch_stats]
+                else:
+                    parameters[f"ClassicalLayer{c_counts}"] = c_params
+                c_counts += 1
+
+        return parameters
 
     def tree_flatten(self):
         """
         Prepares the class instance for JAX tree operations.
         """
-        children = [self.layers_params]
-        aux_data = {'parameters': self.parameters}
+        children = [self.parameters]
+        aux_data = {'layers_params': self.layers_params}
         return children, aux_data
 
     @classmethod
@@ -134,21 +151,16 @@ class EstimatorParameters:
         """
         return cls(*children, **aux_data)
 
-    def __post_init__(self):
-        q_counts, c_counts = 0, 0
-        for layer_params in self.layers_params:
-            q_params, c_params, batch_stats = layer_params
-
-            if q_params is not None:
-                self.parameters[f"QuantumLayer{q_counts}"] = q_params
-                q_counts += 1
-
-            if c_params is not None:
-                if batch_stats is not None:
-                    self.parameters[f"ClassicalLayer{c_counts}"] = [c_params, batch_stats]
-                else:
-                    self.parameters[f"ClassicalLayer{c_counts}"] = c_params
-                c_counts += 1
+    def __repr__(self):
+        parameters_repr = ",\n    ".join(
+            f"    {key!r}: {value!r}" for key, value in self.parameters.items())
+        return (
+            f"{self.__class__.__name__}(\n"
+            f"    parameters=OrderedDict([\n    "
+            f"{parameters_repr}\n"
+            f"    ])\n"
+            f")"
+        )
 
 
 class EstimatorLayer:
@@ -327,7 +339,7 @@ class QuantumLayer(EstimatorLayer):
                 ]
             else:
                 return qml.probs(wires=range(self._n_qubits))
-        return jnp.array(_q_node())
+        return jnp.array(_q_node()).T
 
     def backward_pass(
             self,
@@ -348,7 +360,6 @@ class QuantumLayer(EstimatorLayer):
         """
         def _calculate_loss(q_params, x, y):
             predictions = self.forward_pass(q_params=q_params, x_data=x)
-            predictions = jnp.array(predictions).T
             loss_val = loss_fn(predictions, y).mean()
             return loss_val
 
@@ -356,6 +367,7 @@ class QuantumLayer(EstimatorLayer):
             _calculate_loss, argnums=0)(self.params.q_params, x_data, y_data)
 
         return loss, grads
+
 
 class ClassicalLayer(EstimatorLayer):
     def __init__(
@@ -493,18 +505,16 @@ class Estimator:
             self,
             loss_fn: Callable,
             optimizer_fn: Callable,
-            estimator_type: str,
-            init_args: Dict[str, Any]
+            layers: List[EstimatorLayer],
+            estimator_type: str
     ):
         self.loss_fn = loss_fn
         self.optimizer_fn = optimizer_fn
         self.estimator_type = estimator_type
-        self._init_args = init_args
         self.input_shape = None
 
-        # Initiate parameters
-        self.params = EstimatorLayerParameters()
-        self.init_parameters()
+        # Define estimator layers
+        self.layers = layers
 
         # Initiate estimator optimizer
         self._trainer = self._init_trainer()
@@ -525,40 +535,42 @@ class Estimator:
                 f" available options are {'quantum', 'classical', 'hybrid'}"
             )
 
-    def init_parameters(self):
-        """
-        Initiates estimator model parameters.
-        """
-        # As JAX implements an explicit PRNG, we need to artificially change random seed, in order to
-        # achiever pseudo sampling, allowing to get different numbers each time we sample parameters
-        self.random_seed += 1
-
-        # Initiate estimator parameters with sampled numbers
-        self.params = EstimatorParameters(
-            **self._sample_parameters(**self._init_args)
-        )
-
-    @abstractmethod
-    def _sample_parameters(self, **kwargs):
-        """
-        Abstract method for sampling estimator parameters.
-        """
-        raise NotImplementedError("Subclasses must implement this method.")
-
-    @abstractmethod
     def forward(
             self,
             x_data: jnp.ndarray,
-            q_weights: Union[jnp.ndarray, None] = None,
-            c_weights: Union[Dict[str, Mapping[str, jnp.ndarray]], None] = None,
-            batch_stats: Union[Dict[str, Mapping[str, jnp.ndarray]], None] = None,
-            training: Union[bool, None] = None,
-            q_model_probs: Union[bool] = False
+            return_q_probs: bool = False,
+            flatten_c_output: bool = False
     ):
         """
-        Abstract method for defining estimator model.
+        Forward pass method of the entire estimator model.
+
+        Args:
+            x_data: Input data.
+            return_q_probs: Indicates whether the quantum model shall return probabilities.
+            flatten_c_output: Indicates whether to flatten the classical output.
+
+        Returns:
+            Output logits of the estimator.
         """
-        raise NotImplementedError("Subclasses must implement this method.")
+        output = x_data
+        for layer in self.layers:
+            q_params, c_params, batch_stats = layer.params
+
+            if isinstance(layer, QuantumLayer):
+                output = layer.forward_pass(
+                    x_data=output, q_params=q_params, return_probs=return_q_probs)
+            elif isinstance(layer, ClassicalLayer):
+                output, batch_stats = layer.forward_pass(
+                    x_data=output, c_params=c_params, batch_stats=batch_stats,
+                    flatten_output=flatten_c_output)
+                layer.params.batch_stats = batch_stats
+            else:
+                raise ValueError(
+                    f"Estimator layer type not recognized: {type(layer)}"
+                )
+
+        return output
+
 
     def fit(
             self,
@@ -611,41 +623,3 @@ class Estimator:
         )
 
         self.params = EstimatorParameters(**trainer.parameters)
-
-    def model_save(
-            self,
-            directory: str,
-            name: str
-    ) -> None:
-        """
-        Saves the model parameters to a pickle file. This method saves the current state of the model
-        parameters to a specified directory with a given name.
-
-        Args:
-            directory: The directory path where the model should be saved.
-            name: The name of the file to save the model parameters.
-
-        The model is saved in a binary file with a `.model` extension.
-        """
-        dir_ = Path(directory)
-        if not os.path.exists(dir_):
-            os.mkdir(dir_)
-
-        with open(dir_ / f"{name}.model", 'wb') as f:
-            pickle.dump(self.params, f)
-
-    def model_load(
-            self,
-            path: str
-    ) -> None:
-        """
-        Loads model parameters from a pickle file. This method loads the model parameters from a specified
-        file path, updating the `params` attribute of the instance.
-
-        Args:
-            path: The file path to load the model parameters from.
-
-        The method expects a binary file with saved model parameters.
-        """
-        with open(Path(path), 'rb') as f:
-            self.params = pickle.load(f)
