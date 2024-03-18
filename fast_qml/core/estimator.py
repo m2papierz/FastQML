@@ -60,6 +60,19 @@ class EstimatorLayerParameters:
         self.c_params = c_params
         self.batch_stats = batch_stats
 
+    @property
+    def params_num(self):
+        """
+        Initializes the total_params attribute based on the weights and batch stats.
+        """
+        total_params = 0
+        if self.q_params is not None:
+            total_params += len(self.q_params.ravel())
+        if self.c_params is not None:
+            total_params += sum(x.size for x in jax.tree_leaves(self.c_params))
+        return total_params
+
+
     def tree_flatten(self):
         """
         Prepares the class instance for JAX tree operations.
@@ -79,17 +92,6 @@ class EstimatorLayerParameters:
         """
         return cls(*children, **aux_data)
 
-    def get_params_num(self):
-        """
-        Initializes the total_params attribute based on the weights and batch stats.
-        """
-        total_params = 0
-        if self.q_params is not None:
-            total_params += len(self.q_params.ravel())
-        if self.c_params is not None:
-            total_params += sum(x.size for x in jax.tree_leaves(self.c_params))
-        return total_params
-
     def __iter__(self):
         """
         Allow unpacking of the class instance.
@@ -104,7 +106,7 @@ class EstimatorLayerParameters:
             f"    q_params={self.q_params!r},\n"
             f"    c_params={self.c_params!r},\n"
             f"    batch_stats={self.batch_stats!r},\n"
-            f"    total_params={self.get_params_num()!r}\n)"
+            f"    total_params={self.params_num!r}\n)"
         )
 
 
@@ -134,6 +136,13 @@ class EstimatorLayer:
         Property returning estimator layer parameters.
         """
         return self._parameters
+
+    @property
+    def params_num(self) -> int:
+        """
+        Returns the number total of parameters of the layer.
+        """
+        return self._parameters.params_num
 
     def init_parameters(self):
         """
@@ -633,6 +642,13 @@ class Estimator:
         """
         return self._parameters
 
+    @property
+    def params_num(self) -> int:
+        """
+        Returns the number total of parameters of the Estimator.
+        """
+        return sum(layer.params_num for layer in self.layers)
+
     def _init_parameters(self) -> OrderedDict:
         """
         Initiates Estimator parameters as OrderedDict holding parameters of
@@ -678,7 +694,7 @@ class Estimator:
         """
         return cls(*children, **aux_data)
 
-    # @partial(jax.jit, static_argnums=(3, 4))
+    @partial(jax.jit, static_argnums=(3, 4))
     def forward_pass(
             self,
             x_data: Array,
@@ -780,6 +796,9 @@ class Estimator:
         """
         ....
 
+        If early stopping is configured and validation data is provided, the training process will
+        stop early if no improvement is seen in the validation loss for a specified number of epochs.
+
         Args:
             train_data: Input features for training.
             train_targets: Target outputs for training.
@@ -790,9 +809,6 @@ class Estimator:
             batch_size: Size of batches for training. If None, the whole dataset is used in each iteration.
             early_stopping: Instance of EarlyStopping to be used during training.
             verbose : If True, prints verbose messages during training.
-
-        If early stopping is configured and validation data is provided, the training process will
-        stop early if no improvement is seen in the validation loss for a specified number of epochs.
         """
         optimizer = ParametersOptimizer(
             parameters=self._parameters,
