@@ -635,7 +635,7 @@ class Estimator:
         self._loss_fn = loss_fn
         self._optimizer_fn = optimizer_fn
 
-        # If single layer is provided put it into list for compatibility 
+        # If single layer is provided put it into list for compatibility
         # with class methods
         if isinstance(layers, list):
             self.layers = layers
@@ -658,6 +658,41 @@ class Estimator:
         Returns the number total of parameters of the Estimator.
         """
         return sum(layer.params_num for layer in self.layers)
+
+    @property
+    def outputs_num(self) -> int:
+        """
+        Returns the number of outputs of the Estimator.
+        """
+        last_layer = self.layers[-1]
+        if isinstance(last_layer, QuantumLayer):
+            # pylint: disable=protected-access
+            outputs_num = last_layer._measurements_num
+            return outputs_num
+        else:
+            last_c_layer = list(last_layer.parameters.c_params.keys())[-1]
+            outputs_num = last_layer.parameters.c_params[
+                last_c_layer]['kernel'].shape[-1]
+            return outputs_num
+
+
+    def tree_flatten(self):
+        """
+        Prepares the class instance for JAX tree operations.
+        """
+        aux_data = {
+            'layers': self.layers,
+            'loss_fn': self._loss_fn,
+            'optimizer_fn': self._optimizer_fn
+        }
+        return [], aux_data
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        """
+        Reconstructs the class instance from JAX tree operations.
+        """
+        return cls(*children, **aux_data)
 
     def _init_parameters(self) -> OrderedDict:
         """
@@ -685,24 +720,6 @@ class Estimator:
                 c_counts += 1
 
         return parameters
-
-    def tree_flatten(self):
-        """
-        Prepares the class instance for JAX tree operations.
-        """
-        aux_data = {
-            'layers': self.layers,
-            'loss_fn': self._loss_fn,
-            'optimizer_fn': self._optimizer_fn
-        }
-        return [], aux_data
-
-    @classmethod
-    def tree_unflatten(cls, aux_data, children):
-        """
-        Reconstructs the class instance from JAX tree operations.
-        """
-        return cls(*children, **aux_data)
 
     @partial(jax.jit, static_argnums=(3, 4))
     def forward_pass(
@@ -839,6 +856,62 @@ class Estimator:
         )
 
         self._parameters = optimizer.parameters
+
+    def predict_proba(
+            self,
+            x: ArrayLike
+    ) -> Array:
+        """
+        Predict the probability of each class for the given input data. The output probabilities
+        indicate the likelihood of each class for each sample.
+
+        Args:
+            x: An array of input data.
+
+        Returns:
+            An array of predicted probabilities. For binary classification, this will be a 1D array with
+            a single probability for each sample. For multi-class classification, this will be a 2D array
+            where each row corresponds to a sample and each column corresponds to a class.
+        """
+        logits = self.forward_pass(
+            x_data=x,
+            parameters=self._parameters,
+            return_q_probs=False,
+            flatten_c_output=False
+        )
+
+        if self.outputs_num == 2:
+            return jnp.array(logits).ravel()
+        else:
+            return jnp.array(logits)
+
+    def predict(
+            self,
+            x: ArrayLike,
+            threshold: float = 0.5,
+    ) -> Array:
+        """
+        Predict class labels for the given input data.
+
+        For binary classification, the function applies a threshold to the output probabilities to
+        determine the class labels. For multi-class classification, the function assigns each sample
+        to the class with the highest probability.
+
+        Args:
+            x: An array of input data
+            threshold: The threshold for converting probabilities to binary class labels. Defaults to 0.5.
+
+        Returns:
+            An array of predicted class labels. For binary classification, this will be a 1D array with
+            binary labels (0 or 1). For multi-class classification, this will be a 1D array where each
+            element is the predicted class index.
+        """
+        logits = self.predict_proba(x)
+
+        if self.outputs_num == 2:
+            return jnp.where(logits >= threshold, 1, 0)
+        else:
+            return jnp.argmax(logits, axis=1)
 
     def model_save(
             self,
