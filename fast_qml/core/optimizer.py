@@ -18,6 +18,7 @@ import jax
 import optax
 import torch
 import numpy as np
+from jax import Array
 from jax import numpy as jnp
 
 from torch.utils.data import DataLoader
@@ -91,7 +92,8 @@ class ParametersOptimizer:
         Creates a DataLoader from tensors or numpy arrays.
         """
         if isinstance(data, np.ndarray):
-            data, targets = torch.from_numpy(data), torch.from_numpy(targets)
+            data = torch.from_numpy(data).to(torch.float32)
+            targets = torch.from_numpy(targets).to(torch.int32)
         dataset = TensorDataset(data, targets)
         return DataLoader(dataset, batch_size=self._batch_size)
 
@@ -161,9 +163,9 @@ class ParametersOptimizer:
     def _compute_loss(
             self,
             params: OrderedDict,
-            x_data: jnp.ndarray,
-            y_data: jnp.ndarray
-    ) -> float:
+            x_data: Array,
+            y_data: Array
+    ) -> Array:
         """
         Computes the loss of the estimator for a given batch of data.
 
@@ -189,8 +191,8 @@ class ParametersOptimizer:
             self,
             params: OrderedDict,
             opt_state: OptimizerState,
-            data: jnp.ndarray,
-            targets: jnp.ndarray
+            data: Array,
+            targets: Array
     ):
         """
         Perform a single update step.
@@ -217,10 +219,10 @@ class ParametersOptimizer:
     @jax.jit
     def _validation_step(
             self,
-            params: jnp.ndarray,
-            data: jnp.ndarray,
-            targets: jnp.ndarray
-    ) -> float:
+            params: OrderedDict,
+            data: Array,
+            targets: Array
+    ) -> Array:
         """
         Perform a validation step.
 
