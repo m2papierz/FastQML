@@ -23,6 +23,7 @@ from typing import List
 from typing import Tuple
 
 import pickle
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
@@ -31,6 +32,7 @@ import flax.linen as nn
 import pennylane as qml
 from jax import numpy as jnp
 from jax import Array
+from jax.typing import ArrayLike
 from jax.tree_util import register_pytree_node_class
 
 from fast_qml.quantum_circuits.data_encoding import FeatureMap
@@ -52,9 +54,9 @@ class EstimatorLayerParameters:
     """
     def __init__(
             self,
-            q_params: Union[Array, None],
-            c_params: Union[Array, Dict[str, Any], None],
-            batch_stats: Union[Array, Dict[str, Any], None]
+            q_params: Union[ArrayLike, None],
+            c_params: Union[ArrayLike, Dict[str, Any], None],
+            batch_stats: Union[ArrayLike, Dict[str, Any], None]
     ):
         self.q_params = q_params
         self.c_params = c_params
@@ -258,7 +260,7 @@ class QuantumLayer(EstimatorLayer):
             self,
             n_ansatz_params: Union[int, List[int]],
             layers_n: int = None
-    ) -> Dict[str, jnp.ndarray]:
+    ) -> Dict[str, Array]:
         """
         Samples randomly quantum layer parameters.
 
@@ -290,8 +292,8 @@ class QuantumLayer(EstimatorLayer):
 
     def quantum_circuit(
             self,
-            x_data: Union[Array, None] = None,
-            q_weights: Union[Array, None] = None
+            x_data: Union[ArrayLike, None] = None,
+            q_weights: Union[ArrayLike, None] = None
     ) -> None:
         """
         Applies the quantum circuit. This method is conditional on the data reuploading flag.
@@ -345,10 +347,10 @@ class QuantumLayer(EstimatorLayer):
     @partial(jax.jit, static_argnums=(3,))
     def forward_pass(
             self,
-            x_data: Array,
-            q_params: Array,
+            x_data: ArrayLike,
+            q_params: ArrayLike,
             return_probs: Union[bool] = False
-    ):
+    ) -> Array:
         """
         Forward pass method of the quantum layer returning quantum node outputs.
 
@@ -380,9 +382,9 @@ class QuantumLayer(EstimatorLayer):
     @partial(jax.jit, static_argnums=(4,))
     def _compute_loss(
             self,
-            q_params: Array,
-            x_data: Array,
-            y_data: Array,
+            q_params: ArrayLike,
+            x_data: ArrayLike,
+            y_data: ArrayLike,
             loss_fn: Callable
     ) -> Array:
         """
@@ -407,8 +409,8 @@ class QuantumLayer(EstimatorLayer):
     @partial(jax.jit, static_argnums=(3,))
     def backward_pass(
             self,
-            x_data: Array,
-            y_data: Array,
+            x_data: ArrayLike,
+            y_data: ArrayLike,
             loss_fn: Callable
     ) -> Tuple[float, Array]:
         """
@@ -516,9 +518,9 @@ class ClassicalLayer(EstimatorLayer):
     @partial(jax.jit, static_argnums=(4, 5))
     def forward_pass(
             self,
-            x_data: Array,
-            c_params: Dict[str, Mapping[str, Array]],
-            batch_stats: Dict[str, Mapping[str, Array]],
+            x_data: ArrayLike,
+            c_params: Dict[str, Mapping[str, ArrayLike]],
+            batch_stats: Dict[str, Mapping[str, ArrayLike]],
             training: bool = False,
             flatten_output: bool = False
     ) -> Array:
@@ -556,10 +558,10 @@ class ClassicalLayer(EstimatorLayer):
     @partial(jax.jit, static_argnums=(5,))
     def _compute_loss(
             self,
-            c_params: Dict[str, Mapping[str, Array]],
-            batch_stats: Dict[str, Mapping[str, Array]],
-            x_data: Array,
-            y_data: Array,
+            c_params: Dict[str, Mapping[str, ArrayLike]],
+            batch_stats: Dict[str, Mapping[str, ArrayLike]],
+            x_data: ArrayLike,
+            y_data: ArrayLike,
             loss_fn: Callable
     ) -> Array:
         """
@@ -595,8 +597,8 @@ class ClassicalLayer(EstimatorLayer):
     @partial(jax.jit, static_argnums=(3,))
     def backward_pass(
             self,
-            x_data: Array,
-            y_data: Array,
+            x_data: ArrayLike,
+            y_data: ArrayLike,
             loss_fn: Callable
     ) -> Tuple[float, Union[Array, Dict[str, Any]]]:
         """
@@ -735,8 +737,8 @@ class Estimator:
     def _compute_loss(
             self,
             parameters: OrderedDict,
-            x_data: Array,
-            y_data: Array
+            x_data: ArrayLike,
+            y_data: ArrayLike
     ) -> Array:
         """
         Computes the loss of the estimator for a given batch of data.
@@ -761,8 +763,8 @@ class Estimator:
     @jax.jit
     def backward_pass(
             self,
-            x_data: Array,
-            y_data: Array
+            x_data: ArrayLike,
+            y_data: ArrayLike
     ) -> Tuple[float, OrderedDict]:
         """
         Backward pass method of the estimator returning loss value and gradients.
@@ -783,10 +785,10 @@ class Estimator:
 
     def fit(
             self,
-            train_data: Union[Array, torch.Tensor, DataLoader],
-            val_data: Union[Array, torch.Tensor, DataLoader],
-            train_targets: Union[Array, torch.Tensor, None] = None,
-            val_targets: Union[Array, torch.Tensor, None] = None,
+            train_data: Union[np.ndarray, torch.Tensor, DataLoader],
+            val_data: Union[np.ndarray, torch.Tensor, DataLoader],
+            train_targets: Union[np.ndarray, torch.Tensor, None] = None,
+            val_targets: Union[np.ndarray, torch.Tensor, None] = None,
             learning_rate: float = 0.01,
             num_epochs: int = 500,
             batch_size: int = None,
@@ -794,7 +796,7 @@ class Estimator:
             verbose: bool = True
     ) -> None:
         """
-        ....
+        Fits estimator parameters to training data with objective of estimator optimization
 
         If early stopping is configured and validation data is provided, the training process will
         stop early if no improvement is seen in the validation loss for a specified number of epochs.

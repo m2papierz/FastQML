@@ -19,6 +19,7 @@ import optax
 import torch
 import numpy as np
 from jax import Array
+from jax.typing import ArrayLike
 from jax import numpy as jnp
 
 from torch.utils.data import DataLoader
@@ -163,8 +164,8 @@ class ParametersOptimizer:
     def _compute_loss(
             self,
             params: OrderedDict,
-            x_data: Array,
-            y_data: Array
+            x_data: ArrayLike,
+            y_data: ArrayLike
     ) -> Array:
         """
         Computes the loss of the estimator for a given batch of data.
@@ -191,8 +192,8 @@ class ParametersOptimizer:
             self,
             params: OrderedDict,
             opt_state: OptimizerState,
-            data: Array,
-            targets: Array
+            data: ArrayLike,
+            targets: ArrayLike
     ):
         """
         Perform a single update step.
@@ -220,8 +221,8 @@ class ParametersOptimizer:
     def _validation_step(
             self,
             params: OrderedDict,
-            data: Array,
-            targets: Array
+            data: ArrayLike,
+            targets: ArrayLike
     ) -> Array:
         """
         Perform a validation step.
