@@ -43,9 +43,9 @@ from fast_qml.core.callbacks import EarlyStopping
 
 
 @register_pytree_node_class
-class EstimatorLayerParameters:
+class EstimatorComponentParameters:
     """
-    A class to hold parameters for an estimator layer.
+    A class to hold parameters for an estimator component.
 
     Attributes:
         q_params: Quantum parameters.
@@ -112,14 +112,14 @@ class EstimatorLayerParameters:
         )
 
 
-class EstimatorLayer:
+class EstimatorComponent:
     """
-    A base class for implementing custom estimator layers.
+    A base class for implementing custom estimator component.
 
     Attributes:
         _random_seed: A seed value for pseudo-random number generation.
-        _init_args: Initialization arguments for the EstimatorLayerParameters instance.
-        _parameters: An instance of EstimatorLayerParameters containing the layer's parameters.
+        _init_args: Initialization arguments for the EstimatorComponentParameters instance.
+        _parameters: An instance of EstimatorComponentParameters.
     """
     def __init__(
             self,
@@ -128,72 +128,72 @@ class EstimatorLayer:
         self._random_seed = 0
         self._init_args = init_args
 
-        # Initiate estimator layer parameters
+        # Initiate estimator component parameters
         self._parameters = None
         self.init_parameters()
 
     @property
-    def parameters(self) -> EstimatorLayerParameters:
+    def parameters(self) -> EstimatorComponentParameters:
         """
-        Property returning estimator layer parameters.
+        Property returning estimator component parameters.
         """
         return self._parameters
 
     @property
     def params_num(self) -> int:
         """
-        Returns the number total of parameters of the layer.
+        Returns the number total of parameters of the estimator component.
         """
         return self._parameters.params_num
 
     def init_parameters(self):
         """
-        Initiates EstimatorLayerParameters instance for the layer.
+        Initiates EstimatorComponentParameters instance for the estimator component.
         """
         # To ensure varied outcomes in pseudo-random sampling with JAX's explicit PRNG
         # system, we need to manually increment the random seed for each sampling
         self._random_seed += 1
 
-        # Initiate layer parameters with sampled parameters
-        self._parameters = EstimatorLayerParameters(
+        # Initiate component parameters with sampled parameters
+        self._parameters = EstimatorComponentParameters(
             **self._sample_parameters(**self._init_args)
         )
 
     @abstractmethod
     def _sample_parameters(self, **kwargs):
         """
-        Abstract method for sampling estimator layer parameters.
+        Abstract method for sampling estimator component parameters.
         """
         raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
     def forward_pass(self, **kwargs):
         """
-        Abstract method for defining layer forward pass.
+        Abstract method for defining component forward pass.
         """
         raise NotImplementedError("Subclasses must implement this method.")
 
     @abstractmethod
     def backward_pass(self, **kwargs):
         """
-        Abstract method for defining layer backward pass.
+        Abstract method for defining component backward pass.
         """
         raise NotImplementedError("Subclasses must implement this method.")
 
 
 @register_pytree_node_class
-class QuantumLayer(EstimatorLayer):
+class QuantumModel(EstimatorComponent):
     """
-    Implements a quantum layer that can be used in Estimator model.
+    Implements a quantum component model that can be used in Estimator model.
 
-    Attributes:
-        _n_qubits: Number of qubits in the quantum circuit.
-        _feature_map: The feature map to apply to the input data.
-        _ansatz: The variational form (ansatz) used in the circuit.
-        _layers_num: Number of times the ansatz is applied. Defaults to 1.
-        _measurement_op: Operation used for measurement. Defaults to `qml.PauliZ`.
-        _measurements_num: Number of measurements to perform. Defaults to 1.
-        _data_reuploading: Indicates if data reuploading is to be used. Defaults to False.
+    Args:
+        n_qubits: Number of qubits in the quantum circuit.
+        feature_map: The feature map to apply to the input data.
+        ansatz: The variational form (ansatz) used in the circuit.
+        layers_num: Number of times the ansatz is applied. Defaults to 1.
+        measurement_op: Operation used for measurement. Defaults to `qml.PauliZ`.
+        measurements_num: Number of measurements to perform. Defaults to 1.
+        data_reuploading: Indicates if data reuploading is to be used. Defaults to False.
     """
     def __init__(
             self,
@@ -262,7 +262,7 @@ class QuantumLayer(EstimatorLayer):
             layers_n: int = None
     ) -> Dict[str, Array]:
         """
-        Samples randomly quantum layer parameters.
+        Samples randomly quantum model parameters.
 
         Args:
             n_ansatz_params: The number of parameters of the ansatz.
@@ -352,7 +352,7 @@ class QuantumLayer(EstimatorLayer):
             return_probs: Union[bool] = False
     ) -> Array:
         """
-        Forward pass method of the quantum layer returning quantum node outputs.
+        Forward pass method of the quantum model returning quantum node outputs.
 
         Args:
             x_data: Input data array.
@@ -414,8 +414,8 @@ class QuantumLayer(EstimatorLayer):
             loss_fn: Callable
     ) -> Tuple[float, Array]:
         """
-        Backward pass method of the quantum layer returning loss value and gradients computed
-        in regard to quantum layer parameters.
+        Backward pass method of the quantum model returning loss value and gradients computed
+        in regard to quantum model parameters.
 
         Args:
             x_data: Input data array.
@@ -434,14 +434,14 @@ class QuantumLayer(EstimatorLayer):
 
 
 @register_pytree_node_class
-class ClassicalLayer(EstimatorLayer):
+class ClassicalModel(EstimatorComponent):
     """
-    Implements a classical layer for an estimator model.
+    Implements a classical model for an estimator model.
 
-    Attributes:
-        _input_shape: The shape of the input to the layer.
-        _c_module: The Flax module representing the classical component of the layer.
-        _batch_norm: Indicates whether batch normalization is included in the layer.
+    Args:
+        input_shape: The shape of the input to the model.
+        c_module: The Flax module.
+        batch_norm: Indicates whether batch normalization is included in the model.
     """
     def __init__(
             self,
@@ -485,7 +485,7 @@ class ClassicalLayer(EstimatorLayer):
             batch_norm: Union[bool, None] = None
     ):
         """
-        Samples randomly classical layer parameters.
+        Samples randomly classical model parameters.
 
         Args:
             c_module: The classical model component.
@@ -525,7 +525,7 @@ class ClassicalLayer(EstimatorLayer):
             flatten_output: bool = False
     ) -> Array:
         """
-        Forward pass method of the classical layer returning classical model outputs.
+        Forward pass method of the classical model returning classical model outputs.
 
         Args:
             x_data: Input data.
@@ -602,8 +602,8 @@ class ClassicalLayer(EstimatorLayer):
             loss_fn: Callable
     ) -> Tuple[float, Union[Array, Dict[str, Any]]]:
         """
-        Backward pass method of the classical layer returning loss value and gradients in
-        regard to the parameters of the layer.
+        Backward pass method of the classical model returning loss value and gradients in
+        regard to the parameters of the model.
 
         Args:
             x_data: Input data array.
@@ -613,7 +613,7 @@ class ClassicalLayer(EstimatorLayer):
         Returns:
             Tuple of the loss value and the gradients.
         """
-        # Unpack layer parameters
+        # Unpack model parameters
         _, c_params, batch_stats = self.parameters
 
        # Compute gradients and the loss value for the batch of data
@@ -628,19 +628,26 @@ class ClassicalLayer(EstimatorLayer):
 class Estimator:
     def __init__(
             self,
-            layers: Union[EstimatorLayer, List[EstimatorLayer]],
+            estimator_components: Union[EstimatorComponent, List[EstimatorComponent]],
             loss_fn: Callable,
             optimizer_fn: Callable
     ):
         self._loss_fn = loss_fn
         self._optimizer_fn = optimizer_fn
 
-        # If single layer is provided put it into list for compatibility
+        # If single model is provided put it into list for compatibility
         # with class methods
-        if isinstance(layers, list):
-            self.layers = layers
+        if isinstance(estimator_components, list):
+            self.estimator_components = estimator_components
         else:
-            self.layers = [layers]
+            self.estimator_components = [estimator_components]
+
+        # Validate provided component models types
+        for model in self.estimator_components:
+            if not isinstance(model, EstimatorComponent):
+                raise TypeError(
+                    f"Invalid estimator component type: {type(model)}"
+                )
 
         # Initiate estimator parameters
         self._parameters = self._init_parameters()
@@ -657,22 +664,22 @@ class Estimator:
         """
         Returns the number total of parameters of the Estimator.
         """
-        return sum(layer.params_num for layer in self.layers)
+        return sum(model.params_num for model in self.estimator_components)
 
     @property
     def outputs_num(self) -> int:
         """
         Returns the number of outputs of the Estimator.
         """
-        last_layer = self.layers[-1]
-        if isinstance(last_layer, QuantumLayer):
+        last_model = self.estimator_components[-1]
+        if isinstance(last_model, QuantumModel):
             # pylint: disable=protected-access
-            outputs_num = last_layer._measurements_num
+            outputs_num = last_model._measurements_num
             return outputs_num
         else:
-            last_c_layer = list(last_layer.parameters.c_params.keys())[-1]
-            outputs_num = last_layer.parameters.c_params[
-                last_c_layer]['kernel'].shape[-1]
+            last_layer = list(last_model.parameters.c_params.keys())[-1]
+            outputs_num = last_model.parameters.c_params[
+                last_layer]['kernel'].shape[-1]
             return outputs_num
 
 
@@ -681,7 +688,7 @@ class Estimator:
         Prepares the class instance for JAX tree operations.
         """
         aux_data = {
-            'layers': self.layers,
+            'estimator_components': self.estimator_components,
             'loss_fn': self._loss_fn,
             'optimizer_fn': self._optimizer_fn
         }
@@ -697,7 +704,7 @@ class Estimator:
     def _init_parameters(self) -> OrderedDict:
         """
         Initiates Estimator parameters as OrderedDict holding parameters of
-        each Estimator layer.
+        each Estimator component.
 
         Returns:
             OrderedDict holding parameters of the Estimator.
@@ -705,18 +712,18 @@ class Estimator:
         q_counts, c_counts = 0, 0
         parameters = OrderedDict()
 
-        for layer in self.layers:
-            q_params, c_params, batch_stats = layer.parameters
+        for model in self.estimator_components:
+            q_params, c_params, batch_stats = model.parameters
 
             if q_params is not None:
-                parameters[f"QuantumLayer{q_counts}"] = q_params
+                parameters[f"QuantumModel{q_counts}"] = q_params
                 q_counts += 1
 
             if c_params is not None:
                 if batch_stats is not None:
-                    parameters[f"ClassicalLayer{c_counts}"] = [c_params, batch_stats]
+                    parameters[f"ClassicalModel{c_counts}"] = [c_params, batch_stats]
                 else:
-                    parameters[f"ClassicalLayer{c_counts}"] = [c_params, None]
+                    parameters[f"ClassicalModel{c_counts}"] = [c_params, None]
                 c_counts += 1
 
         return parameters
@@ -734,7 +741,7 @@ class Estimator:
 
         Args:
             x_data: Input data.
-            parameters:
+            parameters: Parameters of the estimator model.
             return_q_probs: Indicates whether the quantum model shall return probabilities.
             flatten_c_output: Indicates whether to flatten the classical output.
 
@@ -742,18 +749,18 @@ class Estimator:
             Output logits of the estimator.
         """
         output = x_data
-        for layer, params in zip(self.layers, parameters.values()):
-            if isinstance(layer, QuantumLayer):
-                output = layer.forward_pass(
+        for model, params in zip(self.estimator_components, parameters.values()):
+            if isinstance(model, QuantumModel):
+                output = model.forward_pass(
                     x_data=output, q_params=params, return_probs=return_q_probs)
-            elif isinstance(layer, ClassicalLayer):
+            elif isinstance(model, ClassicalModel):
                 params, batch_stats = params
-                output, _ = layer.forward_pass(
+                output, _ = model.forward_pass(
                     x_data=output, c_params=params, batch_stats=batch_stats,
                     flatten_output=flatten_c_output)
             else:
                 raise ValueError(
-                    f"Estimator layer type not recognized: {type(layer)}"
+                    f"Estimator component type not recognized: {type(model)}"
                 )
 
         return output
