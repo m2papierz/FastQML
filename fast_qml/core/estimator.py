@@ -628,13 +628,21 @@ class ClassicalLayer(EstimatorLayer):
 class Estimator:
     def __init__(
             self,
-            layers: List[EstimatorLayer],
+            layers: Union[EstimatorLayer, List[EstimatorLayer]],
             loss_fn: Callable,
             optimizer_fn: Callable
     ):
-        self.layers = layers
         self._loss_fn = loss_fn
         self._optimizer_fn = optimizer_fn
+
+        # If single layer is provided put it into list for compatibility 
+        # with class methods
+        if isinstance(layers, list):
+            self.layers = layers
+        else:
+            self.layers = [layers]
+
+        # Initiate estimator parameters
         self._parameters = self._init_parameters()
 
     @property
