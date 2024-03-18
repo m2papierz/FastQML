@@ -30,6 +30,7 @@ import jax
 import flax.linen as nn
 import pennylane as qml
 from jax import numpy as jnp
+from jax import Array
 from jax.tree_util import register_pytree_node_class
 
 from fast_qml.quantum_circuits.data_encoding import FeatureMap
@@ -51,9 +52,9 @@ class EstimatorLayerParameters:
     """
     def __init__(
             self,
-            q_params: Union[jnp.ndarray, None],
-            c_params: Union[jnp.ndarray, Dict[str, Any], None],
-            batch_stats: Union[jnp.ndarray, Dict[str, Any], None]
+            q_params: Union[Array, None],
+            c_params: Union[Array, Dict[str, Any], None],
+            batch_stats: Union[Array, Dict[str, Any], None]
     ):
         self.q_params = q_params
         self.c_params = c_params
@@ -108,6 +109,14 @@ class EstimatorLayerParameters:
 
 
 class EstimatorLayer:
+    """
+    A base class for implementing custom estimator layers.
+
+    Attributes:
+        _random_seed: A seed value for pseudo-random number generation.
+        _init_args: Initialization arguments for the EstimatorLayerParameters instance.
+        _parameters: An instance of EstimatorLayerParameters containing the layer's parameters.
+    """
     def __init__(
             self,
             init_args: Dict[str, Any]
@@ -115,21 +124,27 @@ class EstimatorLayer:
         self._random_seed = 0
         self._init_args = init_args
 
-        # Initiate layer parameters
-        self.params = EstimatorLayerParameters(
-            q_params=None, c_params=None, batch_stats=None)
+        # Initiate estimator layer parameters
+        self._parameters = None
         self.init_parameters()
+
+    @property
+    def parameters(self) -> EstimatorLayerParameters:
+        """
+        Property returning estimator layer parameters.
+        """
+        return self._parameters
 
     def init_parameters(self):
         """
-        Initiates estimator layer parameters.
+        Initiates EstimatorLayerParameters instance for the layer.
         """
-        # To ensure varied outcomes in pseudo-random sampling with JAX's explicit PRNG system,
-        # we need to manually increment the random seed for each sampling
+        # To ensure varied outcomes in pseudo-random sampling with JAX's explicit PRNG
+        # system, we need to manually increment the random seed for each sampling
         self._random_seed += 1
 
         # Initiate layer parameters with sampled parameters
-        self.params = EstimatorLayerParameters(
+        self._parameters = EstimatorLayerParameters(
             **self._sample_parameters(**self._init_args)
         )
 
@@ -157,6 +172,18 @@ class EstimatorLayer:
 
 @register_pytree_node_class
 class QuantumLayer(EstimatorLayer):
+    """
+    Implements a quantum layer that can be used in Estimator model.
+
+    Attributes:
+        _n_qubits: Number of qubits in the quantum circuit.
+        _feature_map: The feature map to apply to the input data.
+        _ansatz: The variational form (ansatz) used in the circuit.
+        _layers_num: Number of times the ansatz is applied. Defaults to 1.
+        _measurement_op: Operation used for measurement. Defaults to `qml.PauliZ`.
+        _measurements_num: Number of measurements to perform. Defaults to 1.
+        _data_reuploading: Indicates if data reuploading is to be used. Defaults to False.
+    """
     def __init__(
             self,
             n_qubits: int,
@@ -246,7 +273,7 @@ class QuantumLayer(EstimatorLayer):
         return {'q_params': weights, 'c_params': None, 'batch_stats': None}
 
     @staticmethod
-    def _is_valid_measurement_op(measurement_op):
+    def _is_valid_measurement_op(measurement_op) -> bool:
         """
         Check if the provided measurement operation is valid.
         """
@@ -254,8 +281,8 @@ class QuantumLayer(EstimatorLayer):
 
     def quantum_circuit(
             self,
-            x_data: Union[jnp.ndarray, None] = None,
-            q_weights: Union[jnp.ndarray, None] = None
+            x_data: Union[Array, None] = None,
+            q_weights: Union[Array, None] = None
     ) -> None:
         """
         Applies the quantum circuit. This method is conditional on the data reuploading flag.
@@ -283,8 +310,8 @@ class QuantumLayer(EstimatorLayer):
         """
         Draws the quantum circuit of the model.
 
-        Args
-             device_expansion: Whether to use 'device' expansion strategy.
+        Args:
+             device_expansion: Boolean flag indicating if to use 'device' expansion strategy.
         """
         if isinstance(self._feature_map, AmplitudeEmbedding):
             aux_input = jnp.zeros(2 ** self._n_qubits)
@@ -301,16 +328,16 @@ class QuantumLayer(EstimatorLayer):
 
         # Print the circuit drawing
         print(qml.draw(
-            qnode =draw_q_node,
+            qnode=draw_q_node,
             expansion_strategy='device' if device_expansion else 'gradient',
-            show_matrices=False)(aux_input, self.params.q_params)
+            show_matrices=False)(aux_input, self.parameters.q_params)
         )
 
     @partial(jax.jit, static_argnums=(3,))
     def forward_pass(
             self,
-            x_data: jnp.ndarray,
-            q_params: jnp.ndarray,
+            x_data: Array,
+            q_params: Array,
             return_probs: Union[bool] = False
     ):
         """
@@ -338,16 +365,17 @@ class QuantumLayer(EstimatorLayer):
                 ]
             else:
                 return qml.probs(wires=range(self._n_qubits))
+
         return jnp.array(_q_node()).T
 
     @partial(jax.jit, static_argnums=(4,))
     def _compute_loss(
             self,
-            q_params: jnp.ndarray,
-            x_data: jnp.ndarray,
-            y_data: jnp.ndarray,
+            q_params: Array,
+            x_data: Array,
+            y_data: Array,
             loss_fn: Callable
-    ):
+    ) -> Array:
         """
         Computes the loss of the model for a given batch of data. This method performs a forward
         pass using the model's parameters and the input data, and computes the loss using the provided
@@ -370,12 +398,13 @@ class QuantumLayer(EstimatorLayer):
     @partial(jax.jit, static_argnums=(3,))
     def backward_pass(
             self,
-            x_data: jnp.ndarray,
-            y_data: jnp.ndarray,
+            x_data: Array,
+            y_data: Array,
             loss_fn: Callable
-    ) -> Tuple[float, jnp.ndarray]:
+    ) -> Tuple[float, Array]:
         """
-        Backward pass method of the quantum layer returning loss value and gradients.
+        Backward pass method of the quantum layer returning loss value and gradients computed
+        in regard to quantum layer parameters.
 
         Args:
             x_data: Input data array.
@@ -388,13 +417,21 @@ class QuantumLayer(EstimatorLayer):
         # Compute gradients and the loss value for the batch of data
         loss, grads = jax.value_and_grad(
             fun=self._compute_loss,
-            argnums=0)(self.params.q_params, x_data, y_data, loss_fn)
+            argnums=0)(self.parameters.q_params, x_data, y_data, loss_fn)
 
         return loss, grads
 
 
 @register_pytree_node_class
 class ClassicalLayer(EstimatorLayer):
+    """
+    Implements a classical layer for an estimator model.
+
+    Attributes:
+        _input_shape: The shape of the input to the layer.
+        _c_module: The Flax module representing the classical component of the layer.
+        _batch_norm: Indicates whether batch normalization is included in the layer.
+    """
     def __init__(
             self,
             input_shape: Union[int, Tuple[int]],
@@ -470,12 +507,12 @@ class ClassicalLayer(EstimatorLayer):
     @partial(jax.jit, static_argnums=(4, 5))
     def forward_pass(
             self,
-            x_data: jnp.ndarray,
-            c_params: Dict[str, Mapping[str, jnp.ndarray]],
-            batch_stats: Dict[str, Mapping[str, jnp.ndarray]],
+            x_data: Array,
+            c_params: Dict[str, Mapping[str, Array]],
+            batch_stats: Dict[str, Mapping[str, Array]],
             training: bool = False,
             flatten_output: bool = False
-    ) -> jnp.ndarray:
+    ) -> Array:
         """
         Forward pass method of the classical layer returning classical model outputs.
 
@@ -510,12 +547,12 @@ class ClassicalLayer(EstimatorLayer):
     @partial(jax.jit, static_argnums=(5,))
     def _compute_loss(
             self,
-            c_params: Dict[str, Mapping[str, jnp.ndarray]],
-            batch_stats: Dict[str, Mapping[str, jnp.ndarray]],
-            x_data: jnp.ndarray,
-            y_data: jnp.ndarray,
+            c_params: Dict[str, Mapping[str, Array]],
+            batch_stats: Dict[str, Mapping[str, Array]],
+            x_data: Array,
+            y_data: Array,
             loss_fn: Callable
-    ):
+    ) -> Array:
         """
         Computes the loss of the model for a given batch of data.
 
@@ -542,19 +579,20 @@ class ClassicalLayer(EstimatorLayer):
 
         # Update batch statistics if applicable
         if batch_stats:
-            self.params.batch_stats = batch_stats
+            self.parameters.batch_stats = batch_stats
 
         return loss_fn(predictions, y_data).mean()
 
     @partial(jax.jit, static_argnums=(3,))
     def backward_pass(
             self,
-            x_data: jnp.ndarray,
-            y_data: jnp.ndarray,
+            x_data: Array,
+            y_data: Array,
             loss_fn: Callable
-    ) -> Tuple[float, Union[jnp.ndarray, Dict[str, Any]]]:
+    ) -> Tuple[float, Union[Array, Dict[str, Any]]]:
         """
-        Backward pass method of the classical layer returning loss value and gradients.
+        Backward pass method of the classical layer returning loss value and gradients in
+        regard to the parameters of the layer.
 
         Args:
             x_data: Input data array.
@@ -564,10 +602,13 @@ class ClassicalLayer(EstimatorLayer):
         Returns:
             Tuple of the loss value and the gradients.
         """
+        # Unpack layer parameters
+        _, c_params, batch_stats = self.parameters
+
        # Compute gradients and the loss value for the batch of data
         loss, grads = jax.value_and_grad(
             self._compute_loss, argnums=0
-        )(self.params.c_params, self.params.batch_stats, x_data, y_data, loss_fn)
+        )(c_params, batch_stats, x_data, y_data, loss_fn)
 
         return loss, grads
 
@@ -583,18 +624,28 @@ class Estimator:
         self.layers = layers
         self._loss_fn = loss_fn
         self._optimizer_fn = optimizer_fn
-        self._params = self._init_parameters()
+        self._parameters = self._init_parameters()
 
     @property
-    def params(self):
-        return self._params
+    def parameters(self) -> OrderedDict:
+        """
+        Property returning estimator parameters.
+        """
+        return self._parameters
 
-    def _init_parameters(self):
+    def _init_parameters(self) -> OrderedDict:
+        """
+        Initiates Estimator parameters as OrderedDict holding parameters of
+        each Estimator layer.
+
+        Returns:
+            OrderedDict holding parameters of the Estimator.
+        """
         q_counts, c_counts = 0, 0
         parameters = OrderedDict()
 
         for layer in self.layers:
-            q_params, c_params, batch_stats = layer.params
+            q_params, c_params, batch_stats = layer.parameters
 
             if q_params is not None:
                 parameters[f"QuantumLayer{q_counts}"] = q_params
@@ -604,7 +655,7 @@ class Estimator:
                 if batch_stats is not None:
                     parameters[f"ClassicalLayer{c_counts}"] = [c_params, batch_stats]
                 else:
-                    parameters[f"ClassicalLayer{c_counts}"] = c_params
+                    parameters[f"ClassicalLayer{c_counts}"] = [c_params, None]
                 c_counts += 1
 
         return parameters
@@ -627,10 +678,10 @@ class Estimator:
         """
         return cls(*children, **aux_data)
 
-    @partial(jax.jit, static_argnums=(3, 4))
+    # @partial(jax.jit, static_argnums=(3, 4))
     def forward_pass(
             self,
-            x_data: jnp.ndarray,
+            x_data: Array,
             parameters: OrderedDict,
             return_q_probs: bool = False,
             flatten_c_output: bool = False
@@ -649,12 +700,11 @@ class Estimator:
         """
         output = x_data
         for layer, params in zip(self.layers, parameters.values()):
-            q_params, c_params, batch_stats = layer.params
-
             if isinstance(layer, QuantumLayer):
                 output = layer.forward_pass(
                     x_data=output, q_params=params, return_probs=return_q_probs)
             elif isinstance(layer, ClassicalLayer):
+                params, batch_stats = params
                 output, _ = layer.forward_pass(
                     x_data=output, c_params=params, batch_stats=batch_stats,
                     flatten_output=flatten_c_output)
@@ -669,9 +719,9 @@ class Estimator:
     def _compute_loss(
             self,
             parameters: OrderedDict,
-            x_data: jnp.ndarray,
-            y_data: jnp.ndarray
-    ):
+            x_data: Array,
+            y_data: Array
+    ) -> Array:
         """
         Computes the loss of the estimator for a given batch of data.
 
@@ -695,8 +745,8 @@ class Estimator:
     @jax.jit
     def backward_pass(
             self,
-            x_data: jnp.ndarray,
-            y_data: jnp.ndarray
+            x_data: Array,
+            y_data: Array
     ) -> Tuple[float, OrderedDict]:
         """
         Backward pass method of the estimator returning loss value and gradients.
@@ -711,16 +761,16 @@ class Estimator:
         # Compute gradients and the loss value for the batch of data
         loss, grads = jax.value_and_grad(
             self._compute_loss, argnums=0
-        )(self._params, x_data=x_data, y_data=y_data)
+        )(self._parameters, x_data=x_data, y_data=y_data)
 
         return loss, grads
 
     def fit(
             self,
-            train_data: Union[jnp.ndarray, torch.Tensor, DataLoader],
-            val_data: Union[jnp.ndarray, torch.Tensor, DataLoader],
-            train_targets: Union[jnp.ndarray, torch.Tensor, None] = None,
-            val_targets: Union[jnp.ndarray, torch.Tensor, None] = None,
+            train_data: Union[Array, torch.Tensor, DataLoader],
+            val_data: Union[Array, torch.Tensor, DataLoader],
+            train_targets: Union[Array, torch.Tensor, None] = None,
+            val_targets: Union[Array, torch.Tensor, None] = None,
             learning_rate: float = 0.01,
             num_epochs: int = 500,
             batch_size: int = None,
@@ -745,7 +795,7 @@ class Estimator:
         stop early if no improvement is seen in the validation loss for a specified number of epochs.
         """
         optimizer = ParametersOptimizer(
-            parameters=self._params,
+            parameters=self._parameters,
             forward_fn=self.forward_pass,
             loss_fn=self._loss_fn,
             optimizer=self._optimizer_fn(learning_rate),
@@ -762,7 +812,7 @@ class Estimator:
             verbose=verbose
         )
 
-        self._params = optimizer.parameters
+        self._parameters = optimizer.parameters
 
     def model_save(
             self,
@@ -784,7 +834,7 @@ class Estimator:
             os.mkdir(dir_)
 
         with open(dir_ / f"{name}.model", 'wb') as f:
-            pickle.dump(self.params, f)
+            pickle.dump(self._parameters, f)
 
     def model_load(
             self,
@@ -800,4 +850,4 @@ class Estimator:
         The method expects a binary file with saved model parameters.
         """
         with open(Path(path), 'rb') as f:
-            self._params = pickle.load(f)
+            self._parameters = pickle.load(f)
