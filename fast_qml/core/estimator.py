@@ -269,10 +269,42 @@ class QuantumLayer(EstimatorLayer):
             self._feature_map.apply(features=x_data)
             for i in range(self._layers_num):
                 self._ansatz.apply(params=q_weights[i])
+                qml.Barrier(only_visual=True)
         else:
             for i in range(self._layers_num):
                 self._feature_map.apply(features=x_data)
                 self._ansatz.apply(params=q_weights[i])
+                qml.Barrier(only_visual=True)
+
+    def draw_circuit(
+            self,
+            device_expansion: bool = False
+    ) -> None:
+        """
+        Draws the quantum circuit of the model.
+
+        Args
+             device_expansion: Whether to use 'device' expansion strategy.
+        """
+        if isinstance(self._feature_map, AmplitudeEmbedding):
+            aux_input = jnp.zeros(2 ** self._n_qubits)
+        else:
+            aux_input = jnp.zeros(self._n_qubits)
+
+        @qml.qnode(device=qml.device("default.qubit", self._n_qubits))
+        def draw_q_node(data, params):
+            self.quantum_circuit(data, params)
+            return [
+                qml.expval(self._measurement_op(i))
+                for i in range(self._measurements_num)
+            ]
+
+        # Print the circuit drawing
+        print(qml.draw(
+            qnode =draw_q_node,
+            expansion_strategy='device' if device_expansion else 'gradient',
+            show_matrices=False)(aux_input, self.params.q_params)
+        )
 
     @partial(jax.jit, static_argnums=(3,))
     def forward_pass(
