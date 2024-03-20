@@ -85,17 +85,19 @@ class BestModelCheckpoint:
     def update(
             self,
             current_val_loss: float,
-            current_params: OrderedDict = None,
+            current_q_params: OrderedDict = None,
+            current_c_params: OrderedDict = None
     ) -> None:
         """
         Updates the best model parameters if the current validation loss is lower.
 
         Args:
             current_val_loss: Current validation loss.
-            current_params: Current estimator model parameters.
+            current_q_params: Current estimator quantum model parameters.
+            current_c_params: Current estimator classical model parameters.
         """
         if current_val_loss < self.best_val_loss:
-            self.best_params = current_params
+            self.best_params = [current_q_params, current_c_params]
             self.best_val_loss = current_val_loss
 
     def load_best_model(self, optimizer) -> None:
@@ -105,4 +107,4 @@ class BestModelCheckpoint:
         Args:
             optimizer: The optimizer instance to update.
         """
-        optimizer._parameters = self.best_params
+        optimizer._q_params, optimizer._c_params = self.best_params
