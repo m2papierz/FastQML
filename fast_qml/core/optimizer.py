@@ -35,18 +35,22 @@ from fast_qml.core.callbacks import BestModelCheckpoint
 class ParametersOptimizer:
     def __init__(
             self,
-            parameters: OrderedDict,
+            q_parameters: OrderedDict,
+            c_parameters: OrderedDict,
             forward_fn: Callable,
             loss_fn: Callable,
-            optimizer: optax.GradientTransformation,
+            q_optimizer: optax.GradientTransformation,
+            c_optimizer: optax.GradientTransformation,
             batch_size: int,
             early_stopping: EarlyStopping = None,
             retrieve_best_weights: bool = True
     ):
-        self._parameters = parameters
+        self._q_params = q_parameters
+        self._c_params = c_parameters
         self._forward_fn = forward_fn
         self._loss_fn = loss_fn
-        self._opt = optimizer
+        self._q_opt = q_optimizer
+        self._c_opt = c_optimizer
         self._batch_size = batch_size
 
         self._early_stopping = early_stopping
@@ -58,21 +62,22 @@ class ParametersOptimizer:
         self._train_loader, self._val_loader = None, None
 
     @property
-    def parameters(self) -> OrderedDict:
+    def parameters(self) -> Tuple[OrderedDict, OrderedDict]:
         """
         Property returning parameters of the optimizer.
         """
-        return self._parameters
+        return self._q_params, self._c_params
 
     def tree_flatten(self):
         """
         Prepares the class instance for JAX tree operations.
         """
-        children = [self._parameters]
+        children = [self._q_params, self._c_params]
         aux_data = {
             'forward_fn': self._forward_fn,
             'loss_fn': self._loss_fn,
-            'optimizer': self._opt,
+            'q_optimizer': self._q_opt,
+            'c_optimizer': self._c_opt,
             'batch_size': self._batch_size
         }
         return children, aux_data
@@ -163,7 +168,8 @@ class ParametersOptimizer:
     @jax.jit
     def _compute_loss(
             self,
-            params: OrderedDict,
+            q_params: OrderedDict,
+            c_params: OrderedDict,
             x_data: ArrayLike,
             y_data: ArrayLike
     ) -> Array:
@@ -171,7 +177,8 @@ class ParametersOptimizer:
         Computes the loss of the estimator for a given batch of data.
 
         Args:
-            params: Parameters of the estimator.
+            q_params: Parameters of the quantum models.
+            c_params: Parameters of the classical models.
             x_data: Input data for the model.
             y_data: Target data for training.
 
@@ -180,7 +187,8 @@ class ParametersOptimizer:
         """
         predictions = self._forward_fn(
             x_data=x_data,
-            parameters=params,
+            q_parameters=q_params,
+            c_parameters=c_params,
             return_q_probs=False,
             flatten_c_output=False
         )
@@ -190,8 +198,10 @@ class ParametersOptimizer:
     @jax.jit
     def _train_step(
             self,
-            params: OrderedDict,
-            opt_state: OptimizerState,
+            q_params: OrderedDict,
+            c_params: OrderedDict,
+            q_opt_state: OptimizerState,
+            c_opt_state: OptimizerState,
             data: ArrayLike,
             targets: ArrayLike
     ):
@@ -199,28 +209,35 @@ class ParametersOptimizer:
         Perform a single update step.
 
         Args:
-            params: Model parameters.
-            opt_state: Pytree representing the optimizer state to be updated.
+            q_params: Parameters of the quantum models.
+            c_params: Parameters of the classical models.
+            q_opt_state: Pytree representing the quantum optimizer state to be updated.
+            c_opt_state: Pytree representing the classical optimizer state to be updated.
             data: Input data.
             targets: Target data.
 
         Returns:
             Updated parameters, optimizer state, and loss value.
         """
-        loss_val, grads = jax.value_and_grad(
-            self._compute_loss, argnums=0
-        )(params, x_data=data, y_data=targets)
+        loss_val, (q_grads, c_grads) = jax.value_and_grad(
+            self._compute_loss, argnums=(0, 1)
+        )(q_params, c_params, x_data=data, y_data=targets)
 
         # Update quantum model parameters
-        updates, opt_state = self._opt.update(grads, opt_state, params)
-        params = optax.apply_updates(params, updates)
+        updates, q_opt_state = self._q_opt.update(q_grads, q_opt_state, q_params)
+        q_params = optax.apply_updates(q_params, updates)
 
-        return params, opt_state, loss_val
+        # Update quantum model parameters
+        updates, c_opt_state = self._c_opt.update(c_grads, c_opt_state, c_params)
+        c_params = optax.apply_updates(c_params, updates)
+
+        return q_params, c_params, q_opt_state, c_opt_state, loss_val
 
     @jax.jit
     def _validation_step(
             self,
-            params: OrderedDict,
+            q_params: OrderedDict,
+            c_params: OrderedDict,
             data: ArrayLike,
             targets: ArrayLike
     ) -> Array:
@@ -228,7 +245,8 @@ class ParametersOptimizer:
         Perform a validation step.
 
         Args:
-            params: Model parameters.
+            q_params: Parameters of the quantum models.
+            c_params: Parameters of the classical models.
             data: Input data.
             targets: Target data.
 
@@ -236,18 +254,20 @@ class ParametersOptimizer:
             Loss value for the given data and targets.
         """
         return self._compute_loss(
-            params=params, x_data=data, y_data=targets
+            q_params=q_params, c_params=c_params, x_data=data, y_data=targets
         )
 
     def _training_epoch(
             self,
-            opt_state: OptimizerState
-    ) -> Tuple[float, OptimizerState]:
+            q_opt_state: OptimizerState,
+            c_opt_state: OptimizerState
+    ) -> Tuple[float, OptimizerState, OptimizerState]:
         """
         Performs a single training epoch.
 
         Args:
-            opt_state: Current state of the optimizer.
+            q_opt_state: Current state of the quantum optimizer.
+            c_opt_state: Current state of the classical optimizer.
 
         Returns:
             Average training loss for the epoch.
@@ -258,8 +278,11 @@ class ParametersOptimizer:
         for x_batch, y_batch in iter(self._train_loader):
             # Update parameters and optimizer states, calculate batch loss
             x_batch, y_batch = jnp.array(x_batch), jnp.array(y_batch)
-            self._parameters, opt_state, batch_loss = self._train_step(
-                self._parameters, opt_state, x_batch, y_batch)
+            self._q_params, self._c_params, q_opt_state, c_opt_state, batch_loss = (
+                self._train_step(
+                self._q_params, self._c_params, q_opt_state, c_opt_state, x_batch, y_batch
+                )
+            )
 
             # Accumulate total loss and count the batch
             total_loss += batch_loss
@@ -268,7 +291,7 @@ class ParametersOptimizer:
         # Calculate average loss if there are batches processed
         average_loss = total_loss / num_batches if num_batches > 0 else 0
 
-        return average_loss, opt_state
+        return average_loss, q_opt_state, c_opt_state
 
     def _validation_epoch(self) -> float:
         """
@@ -284,7 +307,7 @@ class ParametersOptimizer:
             # Calculate batch loss
             x_batch, y_batch = jnp.array(x_batch), jnp.array(y_batch)
             batch_loss = self._validation_step(
-                self._parameters, x_batch, y_batch)
+                self._q_params, self._c_params, x_batch, y_batch)
 
             # Accumulate total loss and count the batch
             total_loss += batch_loss
@@ -324,16 +347,25 @@ class ParametersOptimizer:
             val_data=val_data, val_targets=val_targets
         )
 
-        self._opt = optax.chain(optax.clip(1.0), self._opt)
-        opt_state = self._opt.init(self._parameters)
+        # Initiate quantum parameters optimizer
+        self._q_opt = optax.chain(optax.clip(1.0), self._q_opt)
+        q_opt_state = self._q_opt.init(self._q_params)
+
+        # Initiate classical parameters optimizer
+        self._c_opt = optax.chain(optax.clip(1.0), self._c_opt)
+        c_opt_state = self._c_opt.init(self._c_params)
 
         for epoch in range(epochs_num):
-            train_loss, opt_state = self._training_epoch(opt_state=opt_state)
+            train_loss, q_opt_state, c_opt_state = self._training_epoch(
+                q_opt_state=q_opt_state, c_opt_state=c_opt_state)
             val_loss = self._validation_epoch()
 
             if self._best_model_checkpoint:
                 self._best_model_checkpoint.update(
-                    current_val_loss=val_loss, current_params=self._parameters)
+                    current_val_loss=val_loss,
+                    current_q_params=self._q_params,
+                    current_c_params=self._c_params
+                )
 
             # Early stopping logic
             if self._early_stopping:
