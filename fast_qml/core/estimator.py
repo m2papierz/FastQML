@@ -650,14 +650,14 @@ class Estimator:
                 )
 
         # Initiate estimator parameters
-        self._parameters = self._init_parameters()
+        self._q_parameters, self._c_parameters = self._init_parameters()
 
     @property
-    def parameters(self) -> OrderedDict:
+    def parameters(self) -> Tuple[OrderedDict, OrderedDict]:
         """
         Property returning estimator parameters.
         """
-        return self._parameters
+        return self._q_parameters, self._c_parameters
 
     @property
     def params_num(self) -> int:
@@ -701,38 +701,40 @@ class Estimator:
         """
         return cls(*children, **aux_data)
 
-    def _init_parameters(self) -> OrderedDict:
+    def _init_parameters(self) -> Tuple[OrderedDict, OrderedDict]:
         """
         Initiates Estimator parameters as OrderedDict holding parameters of
         each Estimator component.
 
         Returns:
-            OrderedDict holding parameters of the Estimator.
+            Tuple of OrderedDict holding parameters of the Estimator.
         """
         q_counts, c_counts = 0, 0
-        parameters = OrderedDict()
+        q_parameters = OrderedDict()
+        c_parameters = OrderedDict()
 
         for model in self.estimator_components:
             q_params, c_params, batch_stats = model.parameters
 
             if q_params is not None:
-                parameters[f"QuantumModel{q_counts}"] = q_params
+                q_parameters[f"QuantumModel{q_counts}"] = q_params
                 q_counts += 1
 
             if c_params is not None:
                 if batch_stats is not None:
-                    parameters[f"ClassicalModel{c_counts}"] = [c_params, batch_stats]
+                    c_parameters[f"ClassicalModel{c_counts}"] = [c_params, batch_stats]
                 else:
-                    parameters[f"ClassicalModel{c_counts}"] = [c_params, None]
+                    c_parameters[f"ClassicalModel{c_counts}"] = [c_params, None]
                 c_counts += 1
 
-        return parameters
+        return q_parameters, c_parameters
 
-    @partial(jax.jit, static_argnums=(3, 4))
+    @partial(jax.jit, static_argnums=(4, 5))
     def forward_pass(
             self,
             x_data: Array,
-            parameters: OrderedDict,
+            q_parameters: OrderedDict,
+            c_parameters: OrderedDict,
             return_q_probs: bool = False,
             flatten_c_output: bool = False
     ):
@@ -741,7 +743,8 @@ class Estimator:
 
         Args:
             x_data: Input data.
-            parameters: Parameters of the estimator model.
+            q_parameters: Parameters of the quantum models.
+            c_parameters: Parameters of the classical models.
             return_q_probs: Indicates whether the quantum model shall return probabilities.
             flatten_c_output: Indicates whether to flatten the classical output.
 
@@ -749,15 +752,19 @@ class Estimator:
             Output logits of the estimator.
         """
         output = x_data
-        for model, params in zip(self.estimator_components, parameters.values()):
+        q_count, c_count = 0, 0
+        for model in self.estimator_components:
             if isinstance(model, QuantumModel):
+                q_params = q_parameters[f"QuantumModel{q_count}"]
                 output = model.forward_pass(
-                    x_data=output, q_params=params, return_probs=return_q_probs)
+                    x_data=output, q_params=q_params, return_probs=return_q_probs)
+                q_count += 1
             elif isinstance(model, ClassicalModel):
-                params, batch_stats = params
+                c_params, batch_stats = c_parameters[f"ClassicalModel{c_count}"]
                 output, _ = model.forward_pass(
-                    x_data=output, c_params=params, batch_stats=batch_stats,
+                    x_data=output, c_params=c_params, batch_stats=batch_stats,
                     flatten_output=flatten_c_output)
+                c_count += 1
             else:
                 raise ValueError(
                     f"Estimator component type not recognized: {type(model)}"
@@ -768,7 +775,8 @@ class Estimator:
     @jax.jit
     def _compute_loss(
             self,
-            parameters: OrderedDict,
+            q_parameters: OrderedDict,
+            c_parameters: OrderedDict,
             x_data: ArrayLike,
             y_data: ArrayLike
     ) -> Array:
@@ -776,7 +784,8 @@ class Estimator:
         Computes the loss of the estimator for a given batch of data.
 
         Args:
-            parameters: Parameters of the estimator.
+            q_parameters: Parameters of the quantum models.
+            c_parameters: Parameters of the classical models.
             x_data: Input data array.
             y_data: Target data array.
 
@@ -785,7 +794,8 @@ class Estimator:
         """
         predictions = self.forward_pass(
             x_data=x_data,
-            parameters=parameters,
+            q_parameters=q_parameters,
+            c_parameters=c_parameters,
             return_q_probs=False,
             flatten_c_output=False
         )
@@ -797,7 +807,7 @@ class Estimator:
             self,
             x_data: ArrayLike,
             y_data: ArrayLike
-    ) -> Tuple[float, OrderedDict]:
+    ) -> Tuple[float, OrderedDict, OrderedDict]:
         """
         Backward pass method of the estimator returning loss value and gradients.
 
@@ -809,11 +819,11 @@ class Estimator:
             Tuple of the loss value and the gradients.
         """
         # Compute gradients and the loss value for the batch of data
-        loss, grads = jax.value_and_grad(
-            self._compute_loss, argnums=0
-        )(self._parameters, x_data=x_data, y_data=y_data)
+        loss, (q_grads, c_grads) = jax.value_and_grad(
+            self._compute_loss, argnums=(0, 1)
+        )(self._q_parameters, self._c_parameters, x_data=x_data, y_data=y_data)
 
-        return loss, grads
+        return loss, q_grads, c_grads
 
     def fit(
             self,
@@ -821,7 +831,8 @@ class Estimator:
             val_data: Union[np.ndarray, torch.Tensor, DataLoader],
             train_targets: Union[np.ndarray, torch.Tensor, None] = None,
             val_targets: Union[np.ndarray, torch.Tensor, None] = None,
-            learning_rate: float = 0.01,
+            c_learning_rate: float = 0.0001,
+            q_learning_rate: float = 0.01,
             num_epochs: int = 500,
             batch_size: int = None,
             early_stopping: EarlyStopping = None,
@@ -838,17 +849,20 @@ class Estimator:
             train_targets: Target outputs for training.
             val_data: Input features for validation.
             val_targets: Target outputs for validation.
-            learning_rate: Learning rate for the optimizer.
+            c_learning_rate: Learning rate for the classical optimizer.
+            q_learning_rate: Learning rate for the quantum optimizer.
             num_epochs: Number of epochs to run the training.
             batch_size: Size of batches for training. If None, the whole dataset is used in each iteration.
             early_stopping: Instance of EarlyStopping to be used during training.
             verbose : If True, prints verbose messages during training.
         """
         optimizer = ParametersOptimizer(
-            parameters=self._parameters,
+            q_parameters=self._q_parameters,
+            c_parameters=self._c_parameters,
             forward_fn=self.forward_pass,
             loss_fn=self._loss_fn,
-            optimizer=self._optimizer_fn(learning_rate),
+            q_optimizer=self._optimizer_fn(q_learning_rate),
+            c_optimizer=self._optimizer_fn(c_learning_rate),
             batch_size=batch_size,
             early_stopping=early_stopping
         )
@@ -862,7 +876,7 @@ class Estimator:
             verbose=verbose
         )
 
-        self._parameters = optimizer.parameters
+        self._q_parameters, self._c_parameters = optimizer.parameters
 
     def predict_proba(
             self,
@@ -882,7 +896,8 @@ class Estimator:
         """
         logits = self.forward_pass(
             x_data=x,
-            parameters=self._parameters,
+            q_parameters=self._q_parameters,
+            c_parameters=self._c_parameters,
             return_q_probs=False,
             flatten_c_output=False
         )
@@ -913,6 +928,7 @@ class Estimator:
             binary labels (0 or 1). For multi-class classification, this will be a 1D array where each
             element is the predicted class index.
         """
+        x = jnp.array(x, dtype=jnp.float32)
         logits = self.predict_proba(x)
 
         if self.outputs_num == 2:
