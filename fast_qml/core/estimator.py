@@ -664,7 +664,8 @@ class Estimator:
                 )
 
         # Initiate estimator parameters
-        self._parameters = self.init_parameters()
+        self._parameters = OrderedDict()
+        self.init_parameters(resample=False)
 
     @property
     def parameters(self) -> OrderedDict:
@@ -736,32 +737,37 @@ class Estimator:
         """
         return cls(*children, **aux_data)
 
-    def init_parameters(self) -> OrderedDict:
+    def init_parameters(
+            self,
+            resample: bool = False
+    ) -> None:
         """
         Initiates Estimator parameters as OrderedDict holding parameters of
         each Estimator component.
+
+        Args:
+            resample: Indicates whether to resample the estimator components parameters.
 
         Returns:
             Tuple of OrderedDict holding parameters of the Estimator.
         """
         q_idx, c_idx = 0, 0
-        parameters = OrderedDict()
 
         for m in self.estimator_components:
+            if resample:
+                m.init_parameters()
             q_params, c_params, batch_stats = m.parameters
 
             if isinstance(m, QuantumModel):
-                parameters[f"{m.model_type}{q_idx}"] = q_params
+                self._parameters[f"{m.model_type}{q_idx}"] = q_params
                 q_idx += 1
 
             if isinstance(m, ClassicalModel):
                 if batch_stats is not None:
-                    parameters[f"{m.model_type}{c_idx}"] = [c_params, batch_stats]
+                    self._parameters[f"{m.model_type}{c_idx}"] = [c_params, batch_stats]
                 else:
-                    parameters[f"{m.model_type}{c_idx}"] = [c_params, None]
+                    self._parameters[f"{m.model_type}{c_idx}"] = [c_params, None]
                 c_idx += 1
-
-        return parameters
 
     def _update_parameters(
             self,
