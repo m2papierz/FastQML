@@ -474,6 +474,13 @@ class ClassicalModel(EstimatorComponent):
         self._c_module = c_module
         self._batch_norm = batch_norm
 
+    @property
+    def input_shape(self) -> Union[int, Tuple[int]]:
+        """
+        Property returning the shape of the input to the model.
+        """
+        return self._input_shape
+
     def tree_flatten(self):
         """
         Prepares the class instance for JAX tree operations.
@@ -513,9 +520,9 @@ class ClassicalModel(EstimatorComponent):
             jax.random.PRNGKey(seed=self._random_seed), num=2)
 
         if isinstance(input_shape, int):
-            self.input_shape = (1, input_shape)
+            self._input_shape = (1, input_shape)
         else:
-            self.input_shape = (1, *input_shape)
+            self._input_shape = (1, *input_shape)
 
         c_inp = jax.random.normal(
             inp_rng, shape=self.input_shape, dtype=jnp.float32)
