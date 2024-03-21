@@ -234,6 +234,13 @@ class QuantumModel(EstimatorComponent):
         self._measurements_num = measurements_num
         self._data_reuploading = data_reuploading
 
+    @property
+    def measurements_num(self) -> int:
+        """
+        Property returning number of measurements in quantum circuit.
+        """
+        return self._measurements_num
+
     def tree_flatten(self):
         """
         Prepares the class instance for JAX tree operations.
@@ -650,14 +657,36 @@ class Estimator:
                 )
 
         # Initiate estimator parameters
-        self._q_parameters, self._c_parameters = self._init_parameters()
+        self._parameters = self.init_parameters()
 
     @property
-    def parameters(self) -> Tuple[OrderedDict, OrderedDict]:
+    def parameters(self) -> OrderedDict:
         """
         Property returning estimator parameters.
         """
-        return self._q_parameters, self._c_parameters
+        return self._parameters
+
+    @property
+    def q_parameters(self) -> OrderedDict:
+        """
+        Property returning estimator quantum parameters.
+        """
+        q_parameters = OrderedDict()
+        for key, value in self.parameters.items():
+            if key.startswith("QuantumModel"):
+                q_parameters[key] = value
+        return q_parameters
+
+    @property
+    def c_parameters(self) -> OrderedDict:
+        """
+        Property returning estimator classical parameters.
+        """
+        c_parameters = OrderedDict()
+        for key, value in self.parameters.items():
+            if key.startswith("ClassicalModel"):
+                c_parameters[key] = value
+        return c_parameters
 
     @property
     def params_num(self) -> int:
@@ -673,8 +702,7 @@ class Estimator:
         """
         last_model = self.estimator_components[-1]
         if isinstance(last_model, QuantumModel):
-            # pylint: disable=protected-access
-            outputs_num = last_model._measurements_num
+            outputs_num = last_model.measurements_num
             return outputs_num
         else:
             last_layer = list(last_model.parameters.c_params.keys())[-1]
@@ -701,7 +729,7 @@ class Estimator:
         """
         return cls(*children, **aux_data)
 
-    def _init_parameters(self) -> Tuple[OrderedDict, OrderedDict]:
+    def init_parameters(self) -> OrderedDict:
         """
         Initiates Estimator parameters as OrderedDict holding parameters of
         each Estimator component.
@@ -710,24 +738,41 @@ class Estimator:
             Tuple of OrderedDict holding parameters of the Estimator.
         """
         q_counts, c_counts = 0, 0
-        q_parameters = OrderedDict()
-        c_parameters = OrderedDict()
+        parameters = OrderedDict()
 
         for model in self.estimator_components:
             q_params, c_params, batch_stats = model.parameters
 
             if q_params is not None:
-                q_parameters[f"QuantumModel{q_counts}"] = q_params
+                parameters[f"QuantumModel{q_counts}"] = q_params
                 q_counts += 1
 
             if c_params is not None:
                 if batch_stats is not None:
-                    c_parameters[f"ClassicalModel{c_counts}"] = [c_params, batch_stats]
+                    parameters[f"ClassicalModel{c_counts}"] = [c_params, batch_stats]
                 else:
-                    c_parameters[f"ClassicalModel{c_counts}"] = [c_params, None]
+                    parameters[f"ClassicalModel{c_counts}"] = [c_params, None]
                 c_counts += 1
 
-        return q_parameters, c_parameters
+        return parameters
+
+    def _update_parameters(
+            self,
+            q_parameters: Union[OrderedDict, None] = None,
+            c_parameters: Union[OrderedDict, None] = None
+    ) -> None:
+        """
+        Updates the estimator parameters with the provided quantum and classical parameters.
+
+        Args:
+            q_parameters: OrderedDict with updated quantum parameters.
+            c_parameters: OrderedDict with updated classical parameters.
+        """
+        for key in self.parameters.keys():
+            if key in q_parameters:
+                self.parameters[key] = q_parameters[key]
+            elif key in c_parameters:
+                self.parameters[key] = c_parameters[key]
 
     @partial(jax.jit, static_argnums=(4, 5))
     def forward_pass(
@@ -753,14 +798,33 @@ class Estimator:
         """
         output = x_data
         q_count, c_count = 0, 0
-        for model in self.estimator_components:
+        for idx, model in enumerate(self.estimator_components):
             if isinstance(model, QuantumModel):
+                # Unpack the quantum parameters
                 q_params = q_parameters[f"QuantumModel{q_count}"]
+
+                # Probabilities can only be returned in the last layer
+                if (idx + 1) == len(self.estimator_components):
+                    return_q_probs = return_q_probs
+                else:
+                    return_q_probs = False
+
+                # Forward pas of the quantum model
                 output = model.forward_pass(
                     x_data=output, q_params=q_params, return_probs=return_q_probs)
                 q_count += 1
+
             elif isinstance(model, ClassicalModel):
+                # Unpack the classical parameters
                 c_params, batch_stats = c_parameters[f"ClassicalModel{c_count}"]
+
+                # Flattening of the classical model output is only necessary in the last layer
+                if (idx + 1) == len(self.estimator_components):
+                    flatten_c_output = flatten_c_output
+                else:
+                    flatten_c_output = False
+
+                # Forward pas of the classical model
                 output, _ = model.forward_pass(
                     x_data=output, c_params=c_params, batch_stats=batch_stats,
                     flatten_output=flatten_c_output)
@@ -821,7 +885,7 @@ class Estimator:
         # Compute gradients and the loss value for the batch of data
         loss, (q_grads, c_grads) = jax.value_and_grad(
             self._compute_loss, argnums=(0, 1)
-        )(self._q_parameters, self._c_parameters, x_data=x_data, y_data=y_data)
+        )(self.q_parameters, self.c_parameters, x_data=x_data, y_data=y_data)
 
         return loss, q_grads, c_grads
 
@@ -857,8 +921,8 @@ class Estimator:
             verbose : If True, prints verbose messages during training.
         """
         optimizer = ParametersOptimizer(
-            q_parameters=self._q_parameters,
-            c_parameters=self._c_parameters,
+            q_parameters=self.q_parameters,
+            c_parameters=self.c_parameters,
             forward_fn=self.forward_pass,
             loss_fn=self._loss_fn,
             q_optimizer=self._optimizer_fn(q_learning_rate),
@@ -876,7 +940,7 @@ class Estimator:
             verbose=verbose
         )
 
-        self._q_parameters, self._c_parameters = optimizer.parameters
+        self._update_parameters(*optimizer.parameters)
 
     def predict_proba(
             self,
@@ -896,8 +960,8 @@ class Estimator:
         """
         logits = self.forward_pass(
             x_data=x,
-            q_parameters=self._q_parameters,
-            c_parameters=self._c_parameters,
+            q_parameters=self.q_parameters,
+            c_parameters=self.c_parameters,
             return_q_probs=False,
             flatten_c_output=False
         )
