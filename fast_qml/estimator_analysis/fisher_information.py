@@ -13,8 +13,11 @@ An implementation of the Fisher Information Matrix (FIM).
 """
 
 from functools import partial
-from dataclasses import asdict
-from typing import Dict, Any
+
+from collections import OrderedDict
+from typing import Dict
+from typing import Any
+from typing import Tuple
 
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -22,6 +25,8 @@ import matplotlib.pyplot as plt
 import jax
 from jax import vmap
 import jax.numpy as jnp
+from jax import Array
+from jax.typing import ArrayLike
 
 from fast_qml.core.estimator import Estimator
 
@@ -45,33 +50,68 @@ class FisherInformation:
             data: jnp.ndarray
     ):
         self._estimator = estimator
-        self._type = estimator.estimator_type
         self._fim = self._compute_fim(data)
 
     @property
     def fim(self):
+        """
+        Return the computed Fisher Information Matrix (FIM).
+        """
         return self._fim
 
     @staticmethod
-    def _concat_classical_grads(
-            proba_d_dict: Dict[str, Any],
-            proba: jnp.ndarray
-    ) -> jnp.ndarray:
+    def _ravel_quantum_grads(
+            q_proba_d: OrderedDict,
+            outputs_num: int
+    ) -> Array:
         """
-        Ravel model kernels and concatenate into a single matrix.
+        Ravel quantum model parameters and concatenate into a single Array.
+
+        Args:
+            q_proba_d: Derivatives in regard to the quantum model parameters.
+            outputs_num: Number of estimator outputs.
+
+        Returns:
+            Single Array with derivatives in regard to the quantum parameters.
+        """
+        if len(q_proba_d) > 1:
+            q_proba_d = jnp.concatenate([
+                grads for grads in q_proba_d.values()
+            ], axis=1)
+        else:
+            q_proba_d = q_proba_d['QuantumModel0']
+        q_proba_d = jnp.reshape(q_proba_d, newshape=(outputs_num, -1))
+
+        return q_proba_d
+
+    @staticmethod
+    def _ravel_classical_grads(
+            c_proba_d: Dict[str, Any],
+            outputs_num: int
+    ) -> Array:
+        """
+        Ravel classical model kernels and concatenate into a single Array.
+
+        Args:
+            c_proba_d: Derivatives in regard to the classical model parameters.
+            outputs_num: Number of estimator outputs.
+
+        Returns:
+            Single Array with derivatives in regard to the classical parameters.
         """
         return jnp.concatenate(
             arrays=[
-                jnp.reshape(layer['kernel'], newshape=(len(proba), -1)).T
-                for layer in proba_d_dict.values()
+                jnp.reshape(layer['kernel'], newshape=(outputs_num, -1)).T
+                for model_layer in c_proba_d.values()
+                for layer in model_layer[0].values()
             ], axis=0
         )
 
-    @partial(jax.jit, static_argnums=0)
+    # @partial(jax.jit, static_argnums=0)
     def _get_proba_and_grads(
             self,
-            x: jnp.ndarray
-    ):
+            x: ArrayLike
+    ) -> Tuple[Array, Array]:
         """
         Computes the output probabilities and their gradients with respect to the estimator
          parameters for a given input.
@@ -84,37 +124,41 @@ class FisherInformation:
             - jnp.ndarray representing the output probabilities of the model for the given input.
             - jnp.ndarray representing the gradients of the output probabilities.
         """
-        # Sample new set of model parameters and unpack them
-        self._estimator.init_parameters()
-        q_params, c_params, _, _ = asdict(self._estimator.params).values()
+        proba_d = jnp.array([])
 
-        # Ensure that input dimension is correct for the classical estimator component
-        if self._type in ['classical', 'hybrid']:
-            if len(x.shape) < len(self._estimator.input_shape):
-                x = jnp.expand_dims(x, axis=0)
+        # Sample new set of model parameters and unpack them
+        self._estimator.init_parameters(resample=True)
+        q_params = self._estimator.q_parameters
+        c_params = self._estimator.c_parameters
 
         # Compute model output probabilities
-        proba = self._estimator.forward(
-            x_data=x, c_weights=c_params, q_weights=q_params,
-            training=False, q_model_probs=True
+        proba = self._estimator.forward_pass(
+            x_data=x,
+            q_parameters=q_params,
+            c_parameters=c_params,
+            return_q_probs=True
         )
 
         # Compute derivatives of probabilities in regard to model parameters
-        proba_d = jax.jacfwd(
-            self._estimator.forward, argnums=self.argnums[self._type]
-        )(x, q_params, c_params, None, False, True)
+        q_proba_d, c_proba_d = jax.jacfwd(
+            self._estimator.forward_pass, argnums=(1, 2)
+        )(x, q_params, c_params, True)
 
-        # Ravel classical model kernels and concatenate into single matrix
-        if self._type == 'hybrid':
-            proba_d_q, proba_d_c = proba_d
-            proba_d_c = self._concat_classical_grads(proba_d_c, proba)
-            proba_d_q = jnp.reshape(proba_d_q, newshape=(len(proba), -1))
+        # Ravel quantum parameters
+        if len(q_proba_d) != 0:
+            q_proba_d = self._ravel_quantum_grads(
+                q_proba_d=q_proba_d, outputs_num=len(proba))
+            proba_d = q_proba_d
 
-            # Concatenate quantum and classical matrices into one
-            proba_d = jnp.concatenate(arrays=[proba_d_c.T, proba_d_q], axis=1)
+        # Ravel classical parameters
+        if len(c_proba_d) != 0:
+            c_proba_d = self._ravel_classical_grads(
+                c_proba_d=c_proba_d, outputs_num=len(proba))
+            proba_d = c_proba_d
 
-        elif self._type == 'classical':
-            proba_d = self._concat_classical_grads(proba_d, proba).T
+        # Concatenate quantum and classical parameters if both are applied
+        if len(q_proba_d) != 0 and len(c_proba_d) != 0:
+            proba_d = jnp.concatenate(arrays=[q_proba_d, c_proba_d.T], axis=1)
 
         return proba, proba_d
 
