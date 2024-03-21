@@ -50,8 +50,8 @@ class EffectiveDimension:
             The normalized Fisher Information Matrix, averaged over the input data.
         """
         if self._fim is None:
-            fi = FisherInformation(self._estimator)
-            self._fim = fi.fisher_information(x_data)
+            self._fim = FisherInformation(
+                estimator=self._estimator, data=x_data).fim
 
     def get_effective_dimension(
             self,
@@ -82,6 +82,6 @@ class EffectiveDimension:
         numerator = logsumexp(det_log, axis=None) - jnp.log(len(self._fim))
         denominator = jnp.log(dataset_size / (2 * jnp.pi * jnp.log(dataset_size)))
         effective_dims = jnp.squeeze(2 * numerator / denominator)
-        effective_dims = effective_dims / self._estimator.params.total_params
+        effective_dims = effective_dims / self._estimator.params_num
 
         return float(effective_dims)
