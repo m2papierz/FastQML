@@ -133,6 +133,13 @@ class EstimatorComponent:
         self.init_parameters()
 
     @property
+    def model_type(self) -> str:
+        """
+        Property returning the type of the estimator component.
+        """
+        return self.__class__.__name__
+
+    @property
     def parameters(self) -> EstimatorComponentParameters:
         """
         Property returning estimator component parameters.
@@ -673,7 +680,7 @@ class Estimator:
         """
         q_parameters = OrderedDict()
         for key, value in self.parameters.items():
-            if key.startswith("QuantumModel"):
+            if key.startswith(QuantumModel.__name__):
                 q_parameters[key] = value
         return q_parameters
 
@@ -684,7 +691,7 @@ class Estimator:
         """
         c_parameters = OrderedDict()
         for key, value in self.parameters.items():
-            if key.startswith("ClassicalModel"):
+            if key.startswith(ClassicalModel.__name__):
                 c_parameters[key] = value
         return c_parameters
 
@@ -737,22 +744,22 @@ class Estimator:
         Returns:
             Tuple of OrderedDict holding parameters of the Estimator.
         """
-        q_counts, c_counts = 0, 0
+        q_idx, c_idx = 0, 0
         parameters = OrderedDict()
 
-        for model in self.estimator_components:
-            q_params, c_params, batch_stats = model.parameters
+        for m in self.estimator_components:
+            q_params, c_params, batch_stats = m.parameters
 
-            if q_params is not None:
-                parameters[f"QuantumModel{q_counts}"] = q_params
-                q_counts += 1
+            if isinstance(m, QuantumModel):
+                parameters[f"{m.model_type}{q_idx}"] = q_params
+                q_idx += 1
 
-            if c_params is not None:
+            if isinstance(m, ClassicalModel):
                 if batch_stats is not None:
-                    parameters[f"ClassicalModel{c_counts}"] = [c_params, batch_stats]
+                    parameters[f"{m.model_type}{c_idx}"] = [c_params, batch_stats]
                 else:
-                    parameters[f"ClassicalModel{c_counts}"] = [c_params, None]
-                c_counts += 1
+                    parameters[f"{m.model_type}{c_idx}"] = [c_params, None]
+                c_idx += 1
 
         return parameters
 
@@ -801,7 +808,7 @@ class Estimator:
         for idx, model in enumerate(self.estimator_components):
             if isinstance(model, QuantumModel):
                 # Unpack the quantum parameters
-                q_params = q_parameters[f"QuantumModel{q_count}"]
+                q_params = q_parameters[f"{model.model_type}{q_count}"]
 
                 # Probabilities can only be returned in the last layer
                 if (idx + 1) == len(self.estimator_components):
@@ -816,7 +823,7 @@ class Estimator:
 
             elif isinstance(model, ClassicalModel):
                 # Unpack the classical parameters
-                c_params, batch_stats = c_parameters[f"ClassicalModel{c_count}"]
+                c_params, batch_stats = c_parameters[f"{model.model_type}{c_count}"]
 
                 # Flattening of the classical model output is only necessary in the last layer
                 if (idx + 1) == len(self.estimator_components):
