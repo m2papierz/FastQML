@@ -189,8 +189,7 @@ class ParametersOptimizer:
             x_data=x_data,
             q_parameters=q_params,
             c_parameters=c_params,
-            return_q_probs=False,
-            flatten_c_output=False
+            return_q_probs=False
         )
 
         return self._loss_fn(predictions, y_data).mean()
