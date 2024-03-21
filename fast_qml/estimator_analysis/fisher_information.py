@@ -107,7 +107,7 @@ class FisherInformation:
             ], axis=0
         )
 
-    # @partial(jax.jit, static_argnums=0)
+    @partial(jax.jit, static_argnums=0)
     def _get_proba_and_grads(
             self,
             x: ArrayLike
