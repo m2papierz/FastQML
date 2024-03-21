@@ -232,6 +232,7 @@ class QuantumModel(EstimatorComponent):
                 "does not allow to use multiple state preparation operations at the moment."
             )
 
+        # TODO: Possibility of creating QuantumModel without feature map!
 
         self._n_qubits = n_qubits
         self._ansatz = ansatz
@@ -525,7 +526,7 @@ class ClassicalModel(EstimatorComponent):
             self._input_shape = (1, *input_shape)
 
         c_inp = jax.random.normal(
-            inp_rng, shape=self.input_shape, dtype=jnp.float32)
+            inp_rng, shape=self._input_shape, dtype=jnp.float32)
 
         if batch_norm:
             variables = c_module.init(init_rng, c_inp, train=False)
@@ -536,15 +537,14 @@ class ClassicalModel(EstimatorComponent):
 
         return {'q_params': None, 'c_params': weights, 'batch_stats': batch_stats}
 
-    @partial(jax.jit, static_argnums=(4, 5))
+    @partial(jax.jit, static_argnums=(4,))
     def forward_pass(
             self,
             x_data: ArrayLike,
             c_params: Dict[str, Mapping[str, ArrayLike]],
             batch_stats: Dict[str, Mapping[str, ArrayLike]],
-            training: bool = False,
-            flatten_output: bool = False
-    ) -> Array:
+            training: bool = False
+    ) -> Tuple[Array, Union[Array, None]]:
         """
         Forward pass method of the classical model returning classical model outputs.
 
@@ -553,28 +553,26 @@ class ClassicalModel(EstimatorComponent):
             c_params: Parameters of the classical model.
             batch_stats: Batch normalization statistics for the classical model.
             training: Indicates whether the model is being used for training or inference.
-            flatten_output: Indicates whether to flatten the output.
 
         Returns:
             Outputs of the classical model.
         """
+        bs_update = None
+
         if self._batch_norm:
             if training:
                 c_out, updates = self._c_module.apply(
                     {'params': c_params, 'batch_stats': batch_stats},
                     x_data, train=training, mutable=['batch_stats'])
-                output = jax.numpy.array(c_out), updates['batch_stats']
+                bs_update = updates['batch_stats']
             else:
                 c_out = self._c_module.apply(
                     {'params': c_params,'batch_stats': batch_stats},
                     x_data, train=training, mutable=False)
-                output = jax.numpy.array(c_out), None
         else:
-            c_out = self._c_module.apply(
-                {'params': c_params}, x_data)
-            output = jax.numpy.array(c_out), None
+            c_out = self._c_module.apply({'params': c_params}, x_data)
 
-        return output[0] if flatten_output else output
+        return jax.numpy.array(c_out), bs_update
 
     @partial(jax.jit, static_argnums=(5,))
     def _compute_loss(
@@ -606,7 +604,7 @@ class ClassicalModel(EstimatorComponent):
             x_data=x_data,
             c_params=c_params,
             batch_stats=batch_stats,
-            training=True,  flatten_output=False
+            training=True
         )
 
         # Update batch statistics if applicable
@@ -794,14 +792,13 @@ class Estimator:
             elif key in c_parameters:
                 self.parameters[key] = c_parameters[key]
 
-    @partial(jax.jit, static_argnums=(4, 5))
+    @partial(jax.jit, static_argnums=(4,))
     def forward_pass(
             self,
             x_data: Array,
             q_parameters: OrderedDict,
             c_parameters: OrderedDict,
-            return_q_probs: bool = False,
-            flatten_c_output: bool = False
+            return_q_probs: bool = False
     ):
         """
         Forward pass method of the entire estimator model.
@@ -811,7 +808,6 @@ class Estimator:
             q_parameters: Parameters of the quantum models.
             c_parameters: Parameters of the classical models.
             return_q_probs: Indicates whether the quantum model shall return probabilities.
-            flatten_c_output: Indicates whether to flatten the classical output.
 
         Returns:
             Output logits of the estimator.
@@ -834,20 +830,17 @@ class Estimator:
                     x_data=output, q_params=q_params, return_probs=return_q_probs)
                 q_count += 1
 
+                # Transpose output of the quantum model when probabilities are returned
+                if return_q_probs:
+                    output = jnp.transpose(output)
+
             elif isinstance(model, ClassicalModel):
                 # Unpack the classical parameters
                 c_params, batch_stats = c_parameters[f"{model.model_type}{c_count}"]
 
-                # Flattening of the classical model output is only necessary in the last layer
-                if (idx + 1) == len(self.estimator_components):
-                    flatten_c_output = flatten_c_output
-                else:
-                    flatten_c_output = False
-
                 # Forward pas of the classical model
                 output, _ = model.forward_pass(
-                    x_data=output, c_params=c_params, batch_stats=batch_stats,
-                    flatten_output=flatten_c_output)
+                    x_data=output, c_params=c_params, batch_stats=batch_stats)
                 c_count += 1
             else:
                 raise ValueError(
@@ -880,8 +873,7 @@ class Estimator:
             x_data=x_data,
             q_parameters=q_parameters,
             c_parameters=c_parameters,
-            return_q_probs=False,
-            flatten_c_output=False
+            return_q_probs=False
         )
 
         return self._loss_fn(predictions, y_data).mean()
@@ -982,8 +974,7 @@ class Estimator:
             x_data=x,
             q_parameters=self.q_parameters,
             c_parameters=self.c_parameters,
-            return_q_probs=False,
-            flatten_c_output=False
+            return_q_probs=False
         )
 
         if self.outputs_num == 2:
