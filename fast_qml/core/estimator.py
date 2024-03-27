@@ -205,8 +205,8 @@ class QuantumModel(EstimatorComponent):
     def __init__(
             self,
             n_qubits: int,
-            feature_map: FeatureMap,
             ansatz: VariationalForm,
+            feature_map: Union[FeatureMap, None] = None,
             layers_num: Union[int, None] = 1,
             measurement_op: Callable = qml.PauliZ,
             measurements_num: int = 1,
@@ -232,7 +232,10 @@ class QuantumModel(EstimatorComponent):
                 "does not allow to use multiple state preparation operations at the moment."
             )
 
-        # TODO: Possibility of creating QuantumModel without feature map!
+        if feature_map is None and data_reuploading:
+            raise ValueError(
+                "Data reuploading cannot be applied with no feature map provided."
+            )
 
         self._n_qubits = n_qubits
         self._ansatz = ansatz
@@ -319,7 +322,8 @@ class QuantumModel(EstimatorComponent):
             q_weights: Parameters for the variational form.
         """
         if not self._data_reuploading:
-            self._feature_map.apply(features=x_data)
+            if self._feature_map is not None:
+                self._feature_map.apply(features=x_data)
             for i in range(self._layers_num):
                 self._ansatz.apply(params=q_weights[i])
                 qml.Barrier(only_visual=True)
